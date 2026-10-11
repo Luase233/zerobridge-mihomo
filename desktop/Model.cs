@@ -44,8 +44,8 @@ namespace ZeroBridge.Desktop
     {
         public string State = "stopped", Error = "", Source = "", Upstream = "", LogPath = "", Identity = "";
         public DateTime Heartbeat, SampleTime, Started;
-        public double In, Out, Active, TCP, UDP, Rejected, Errors;
-        public bool HasStats, Fresh;
+        public double In, Out, InBytes, OutBytes, Active, TCP, UDP, Rejected, Errors;
+        public bool HasStats, HasBytes, HasHealth, Fresh;
         public bool Ready { get { return State == "ready" && Fresh; } }
     }
 
@@ -97,6 +97,7 @@ namespace ZeroBridge.Desktop
                 s.Heartbeat = File.GetLastWriteTimeUtc(path);
                 s.Fresh = (now - s.Heartbeat).TotalSeconds >= -5 && (now - s.Heartbeat).TotalSeconds < 20;
                 s.State = Json.Text(state, "Status"); s.Error = Json.Text(state, "LastError");
+                s.HasHealth = Json.Object(state, "ProxyHealth") != null;
                 s.Started = Json.Time(Json.Text(state, "StartedUtc"));
                 s.Identity = Json.Text(state, "RunId") + ":" + Json.Text(Json.Object(state, "Proxy"), "Pid");
                 string directory = Json.Text(state, "ProxyDirectory");
@@ -115,6 +116,8 @@ namespace ZeroBridge.Desktop
                         var stats = Json.Object(record, "gateway"); if (stats == null) continue;
                         s.SampleTime = Json.Time(Json.Text(record, "time"));
                         s.In = Json.Number(stats, "packets_in"); s.Out = Json.Number(stats, "packets_out");
+                        s.HasBytes = stats.ContainsKey("bytes_in") && stats.ContainsKey("bytes_out");
+                        s.InBytes = Json.Number(stats, "bytes_in"); s.OutBytes = Json.Number(stats, "bytes_out");
                         s.Active = Json.Number(stats, "active"); s.TCP = Json.Number(stats, "tcp_flows"); s.UDP = Json.Number(stats, "udp_flows");
                         s.Rejected = Json.Number(stats, "rejected"); s.Errors = Json.Number(stats, "errors");
                         s.HasStats = s.SampleTime != DateTime.MinValue && (now - s.SampleTime).TotalSeconds >= -5 && (now - s.SampleTime).TotalSeconds < 20;
@@ -135,7 +138,8 @@ namespace ZeroBridge.Desktop
     internal sealed class Sample
     {
         public DateTime Time;
-        public double InRate, OutRate, Active;
+        public double InRate, OutRate, InMbps, OutMbps, Active;
+        public bool HasBytes;
     }
 
     internal sealed class RateHistory
@@ -147,12 +151,14 @@ namespace ZeroBridge.Desktop
         {
             if (!next.HasStats || !next.Ready) { previous = null; Current = null; return; }
             if (previous != null && next.Identity == previous.Identity && next.SampleTime == previous.SampleTime) return;
-            var point = new Sample { Time = next.SampleTime, Active = next.Active };
+            var point = new Sample { Time = next.SampleTime, Active = next.Active, HasBytes = next.HasBytes };
             if (previous != null && previous.Identity == next.Identity)
             {
                 double seconds = (next.SampleTime - previous.SampleTime).TotalSeconds;
                 if (seconds > 0 && seconds <= 30 && next.In >= previous.In && next.Out >= previous.Out)
                 { point.InRate = (next.In - previous.In) / seconds; point.OutRate = (next.Out - previous.Out) / seconds; }
+                if (seconds > 0 && seconds <= 30 && next.HasBytes && previous.HasBytes && next.InBytes >= previous.InBytes && next.OutBytes >= previous.OutBytes)
+                { point.InMbps = (next.InBytes - previous.InBytes) * 8 / seconds / 1000000; point.OutMbps = (next.OutBytes - previous.OutBytes) * 8 / seconds / 1000000; }
             }
             if (previous == null || previous.Identity != next.Identity) Points.Clear();
             Points.Add(point); if (Points.Count > 120) Points.RemoveAt(0);

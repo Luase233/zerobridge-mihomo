@@ -4,7 +4,7 @@
 param([string]$GatewayRoot = 'C:\ZeroTierGateway')
 
 $ErrorActionPreference = 'Stop'
-$expectedVersion = '0.3.1'
+$expectedVersion = '0.3.2'
 $repoRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent)).TrimEnd('\')
 $GatewayRoot = [IO.Path]::GetFullPath($GatewayRoot).TrimEnd('\')
 if ($GatewayRoot.Contains('"') -or $GatewayRoot.Contains("`n") -or $GatewayRoot.Contains("`r")) { throw 'Invalid gateway path.' }
@@ -98,10 +98,10 @@ $configHash = Hash $configPath
 $gatewayConfigHash = Hash $gatewayConfigPath
 $qrHash = if (Test-Path -LiteralPath $qrPath -PathType Leaf) { Hash $qrPath } else { '' }
 foreach ($file in $files) { $file.SourceHash = Hash $file.Source; $file.OriginalHash = Hash $file.Target }
-if ((Get-Item -LiteralPath $files[1].Source).VersionInfo.FileVersion -ne ($expectedVersion + '.0')) { throw 'Build the v0.3.1 desktop before updating.' }
+if ((Get-Item -LiteralPath $files[1].Source).VersionInfo.FileVersion -ne ($expectedVersion + '.0')) { throw 'Build the v0.3.2 desktop before updating.' }
 # Capture output: --check may contain private proxy-group names. Never print it.
-try { $checkOutput = @(& ($files[0].Source) --config $configPath --check 2>&1) } catch { throw 'The v0.3.1 mobile binary did not pass its read-only Clash controller check.' }
-if ($LASTEXITCODE -ne 0 -or ($checkOutput -join "`n") -notmatch 'version=0\.3\.1(?:;|\s|$)') { throw 'The v0.3.1 mobile binary did not pass its read-only Clash controller check.' }
+try { $checkOutput = @(& ($files[0].Source) --config $configPath --check 2>&1) } catch { throw 'The v0.3.2 mobile binary did not pass its read-only Clash controller check.' }
+if ($LASTEXITCODE -ne 0 -or ($checkOutput -join "`n") -notmatch 'version=0\.3\.2(?:;|\s|$)') { throw 'The v0.3.2 mobile binary did not pass its read-only Clash controller check.' }
 
 $taskNames = @('ZeroBridgeMihomoMobile', 'ZeroBridgeMihomoTray')
 $tasks = @($taskNames | ForEach-Object { Get-ScheduledTask -TaskName $_ -TaskPath '\' })
@@ -140,7 +140,7 @@ try {
         if (Mobile-Ready $restartTime) { break }
         Start-Sleep -Seconds 1
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not (Mobile-Ready $restartTime)) { throw 'The new mobile service did not report a fresh v0.3.1 online heartbeat.' }
+    if (-not (Mobile-Ready $restartTime)) { throw 'The new mobile service did not report a fresh v0.3.2 online heartbeat.' }
     # Keep the original pairing image even if startup regenerated an equivalent QR.
     if ($qrHash) { Copy-Verified $qrBackup $qrPath $qrHash }
     Start-ScheduledTask -TaskName $taskNames[1] -TaskPath '\'
@@ -151,7 +151,7 @@ try {
     for ($i = 0; $i -lt $taskNames.Count; $i++) {
         if ((Export-ScheduledTask -TaskName $taskNames[$i] -TaskPath '\') -ne $taskXml[$i]) { throw 'A control task changed during the update.' }
     }
-    Write-Output 'Updated mobile control and desktop to v0.3.1; fresh online heartbeat verified.'
+    Write-Output 'Updated mobile control and desktop to v0.3.2; fresh online heartbeat verified.'
     Write-Output ('Previous control binaries and pairing QR retained at: ' + $backupDirectory)
     Write-Output 'Gateway, NAT, configurations, task settings and firewall rules were not changed. Reload the iPhone page or reopen its Home Screen app.'
 } catch {

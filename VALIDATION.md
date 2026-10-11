@@ -34,6 +34,16 @@ Control validation for v0.3.1 (2026-10-11):
 - The control updater installed v0.3.1 and verified a fresh online heartbeat. Configuration, pairing QR, gateway binary and runner hashes remained unchanged; task XML was preserved, and the original forwarding run stayed ready. Its initial readiness failure exercised restoration of the previous control binaries before the UTF-8 reader fix.
 - Eight isolated updater checks pass in PowerShell 5.1 and 7, covering hash-checked copying, changed-source rejection, Chinese UTF-8 status, nanosecond timestamps, heartbeat rejection and reused-PID refusal. The test helper never changes installed files, tasks or processes.
 
+Stability validation for v0.3.2 (2026-10-11):
+
+- Full Go tests and vet pass, including separate TCP/UDP expiry, activity/expiry races, half-close replies, legacy configuration defaults, byte counts and connection boundaries. The optional `ZEROBRIDGE_LONG_TCP_TEST=1` test keeps a real packet-to-SOCKS TCP connection idle for 125 seconds with the legacy 120-second UDP limit; the same stream then echoes successfully with no errors or TCP idle expiration.
+- Runtime tests cover interface loss and restoration with a different index, no stale/default return sends, unchanged guard identity requirements, bounded SOCKS-only DNS probes, failure/recovery hysteresis and Windows atomic heartbeat replacement. These simulate interface changes; they do not recreate the deployed physical adapter.
+- PowerShell 5.1 and 7 pass 26 supervisor health checks and 46 gateway updater checks, including PID/start/configuration binding, proof roles, freshness, typed UTC/offset dates after JSON parsing and a forced readiness failure that restores both old files before restarting the previous version. The fixtures never operate installed tasks or processes.
+- UDP loopback benchmarks with 1200-byte datagrams reduce steady-state receive allocations from 1 allocation / 65,603 bytes per operation to 0, and send from 2 allocations / 1,289 bytes to 0. This measures local processing, not cellular or Internet throughput.
+- Fourteen desktop model checks pass, including byte-based Mbps, counter-reset protection and degraded-state chart pause. Both control programs and the gateway build successfully.
+- A rendered 390x844 phone mock verifies latency/group/selection behavior and online/pageshow/visibility recovery. Stale state GETs are cancelled; pending selection/delay POSTs are not aborted or replayed. Pairing and manual group selection persist, offline controls disable, and there are no page-script errors or horizontal overflow.
+- The deployed gateway, mobile control and desktop report v0.3.2. Fresh owned health, SYSTEM boot task, High gateway child priority and both user tasks were checked. Configuration, pairing QR and task settings were preserved; WinNAT remained absent. The user confirmed cellular proxy access/video on initial connection and again after about three minutes idle on a physical iPhone.
+
 Still not established:
 
 - Long-term reliability, independent security audit, sustained adversarial/resource-exhaustion testing.

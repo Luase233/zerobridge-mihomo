@@ -27,49 +27,62 @@ import (
 var ErrPacketRejected = errors.New("packet outside gateway IPv4 TCP/UDP allowlist")
 
 type Config struct {
-	Source      netip.Addr
-	Proxy       string
-	MTU         uint32
-	DNS         string
-	MaxFlows    int
-	IdleTimeout time.Duration
-	WritePacket func([]byte) error
-	Log         *slog.Logger
+	Source   netip.Addr
+	Proxy    string
+	MTU      uint32
+	DNS      string
+	MaxFlows int
+	// IdleTimeout applies to UDP associations. TCP needs a longer quiet period
+	// because healthy keepalive packets do not carry application data.
+	IdleTimeout    time.Duration
+	TCPIdleTimeout time.Duration
+	WritePacket    func([]byte) error
+	Log            *slog.Logger
 }
 
 type Snapshot struct {
-	PacketsIn  uint64 `json:"packets_in"`
-	PacketsOut uint64 `json:"packets_out"`
-	Rejected   uint64 `json:"rejected"`
-	Errors     uint64 `json:"errors"`
-	TCPFlows   uint64 `json:"tcp_flows"`
-	UDPFlows   uint64 `json:"udp_flows"`
-	Active     int    `json:"active"`
+	PacketsIn               uint64 `json:"packets_in"`
+	PacketsOut              uint64 `json:"packets_out"`
+	Rejected                uint64 `json:"rejected"`
+	Errors                  uint64 `json:"errors"`
+	TCPFlows                uint64 `json:"tcp_flows"`
+	UDPFlows                uint64 `json:"udp_flows"`
+	Active                  int    `json:"active"`
+	BytesIn                 uint64 `json:"bytes_in"`
+	BytesOut                uint64 `json:"bytes_out"`
+	UpstreamConnectFailures uint64 `json:"upstream_connect_failures"`
+	FlowLimitRejections     uint64 `json:"flow_limit_rejections"`
+	TCPIdleExpirations      uint64 `json:"tcp_idle_expirations"`
+	UDPIdleExpirations      uint64 `json:"udp_idle_expirations"`
 }
 
 type Gateway struct {
-	cfg                                             Config
-	dns                                             netip.AddrPort
-	proxy                                           *socks.Client
-	ep                                              *channel.Endpoint
-	stack                                           *stack.Stack
-	ctx                                             context.Context
-	cancel                                          context.CancelFunc
-	mu                                              sync.Mutex
-	closed                                          bool
-	flows                                           map[*flow]struct{}
-	wg                                              sync.WaitGroup
-	closeOnce                                       sync.Once
-	in, out, rejected, failures, tcpFlows, udpFlows atomic.Uint64
+	cfg                                                             Config
+	dns                                                             netip.AddrPort
+	proxy                                                           *socks.Client
+	ep                                                              *channel.Endpoint
+	stack                                                           *stack.Stack
+	ctx                                                             context.Context
+	cancel                                                          context.CancelFunc
+	mu                                                              sync.Mutex
+	closed                                                          bool
+	flows                                                           map[*flow]struct{}
+	wg                                                              sync.WaitGroup
+	closeOnce                                                       sync.Once
+	in, out, rejected, failures, tcpFlows, udpFlows                 atomic.Uint64
+	bytesIn, bytesOut, upstreamConnectFailures, flowLimitRejections atomic.Uint64
+	tcpIdleExpirations, udpIdleExpirations                          atomic.Uint64
 }
 
 type flow struct {
-	mu      sync.Mutex
-	closed  bool
-	closers []io.Closer
-	last    atomic.Int64
-	ctx     context.Context
-	cancel  context.CancelFunc
+	mu          sync.Mutex
+	closed      bool
+	closers     []io.Closer
+	last        time.Time
+	idleTimeout time.Duration
+	tcp         bool
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 func New(cfg Config) (*Gateway, error) {
@@ -96,6 +109,12 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	if cfg.IdleTimeout < time.Second {
 		return nil, errors.New("IdleTimeout must be at least one second")
+	}
+	if cfg.TCPIdleTimeout == 0 {
+		cfg.TCPIdleTimeout = 30 * time.Minute
+	}
+	if cfg.TCPIdleTimeout < time.Second {
+		return nil, errors.New("TCPIdleTimeout must be at least one second")
 	}
 	if cfg.DNS == "" {
 		cfg.DNS = "1.1.1.1:53"
@@ -171,6 +190,7 @@ func (g *Gateway) Inject(packet []byte) error {
 	p := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(append([]byte(nil), packet[:length]...))})
 	defer p.DecRef()
 	g.in.Add(1)
+	g.bytesIn.Add(uint64(length))
 	g.ep.InjectInbound(header.IPv4ProtocolNumber, p)
 	return nil
 }
@@ -198,26 +218,40 @@ func (g *Gateway) output() {
 			continue
 		}
 		g.out.Add(1)
+		g.bytesOut.Add(uint64(len(b)))
 	}
 }
 
-func (g *Gateway) start(c net.Conn) *flow {
+func (g *Gateway) start(c net.Conn, tcp bool) *flow {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closed || len(g.flows) >= g.cfg.MaxFlows {
 		g.rejected.Add(1)
+		if !g.closed {
+			g.flowLimitRejections.Add(1)
+		}
 		c.Close()
 		return nil
 	}
 	ctx, cancel := context.WithCancel(g.ctx)
-	f := &flow{ctx: ctx, cancel: cancel, closers: []io.Closer{c}}
+	idleTimeout := g.cfg.IdleTimeout
+	if tcp {
+		idleTimeout = g.cfg.TCPIdleTimeout
+	}
+	f := &flow{ctx: ctx, cancel: cancel, closers: []io.Closer{c}, idleTimeout: idleTimeout, tcp: tcp}
 	f.touch()
 	g.flows[f] = struct{}{}
 	g.wg.Add(1)
 	return f
 }
 
-func (f *flow) touch() { f.last.Store(time.Now().UnixNano()) }
+func (f *flow) touch() {
+	f.mu.Lock()
+	if !f.closed {
+		f.last = time.Now()
+	}
+	f.mu.Unlock()
+}
 func (f *flow) add(c io.Closer) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -237,6 +271,25 @@ func (f *flow) close() {
 	f.closed = true
 	closers := append([]io.Closer(nil), f.closers...)
 	f.mu.Unlock()
+	f.shutdown(closers)
+}
+
+// Activity and the expiry decision share the same lock, so a reaper snapshot
+// cannot close a flow that resumed sending data before the decision.
+func (f *flow) closeIfIdle(now time.Time) bool {
+	f.mu.Lock()
+	if f.closed || now.Sub(f.last) <= f.idleTimeout {
+		f.mu.Unlock()
+		return false
+	}
+	f.closed = true
+	closers := append([]io.Closer(nil), f.closers...)
+	f.mu.Unlock()
+	f.shutdown(closers)
+	return true
+}
+
+func (f *flow) shutdown(closers []io.Closer) {
 	f.cancel()
 	for _, c := range closers {
 		c.Close()
@@ -266,7 +319,7 @@ func (g *Gateway) destination(id stack.TransportEndpointID) (netip.AddrPort, err
 }
 
 func (g *Gateway) HandleTCP(c adapter.TCPConn) {
-	f := g.start(c)
+	f := g.start(c, true)
 	if f == nil {
 		return
 	}
@@ -281,6 +334,9 @@ func (g *Gateway) HandleTCP(c adapter.TCPConn) {
 		up, err := g.proxy.DialTCP(f.ctx, target)
 		if err != nil {
 			g.failures.Add(1)
+			if f.ctx.Err() == nil {
+				g.upstreamConnectFailures.Add(1)
+			}
 			g.cfg.Log.Warn("TCP SOCKS connect failed", "target", target, "error", err)
 			return
 		}
@@ -331,7 +387,7 @@ func copyStream(dst, src net.Conn, f *flow) error {
 }
 
 func (g *Gateway) HandleUDP(c adapter.UDPConn) {
-	f := g.start(c)
+	f := g.start(c, false)
 	if f == nil {
 		return
 	}
@@ -346,6 +402,9 @@ func (g *Gateway) HandleUDP(c adapter.UDPConn) {
 		up, err := g.proxy.Associate(f.ctx)
 		if err != nil {
 			g.failures.Add(1)
+			if f.ctx.Err() == nil {
+				g.upstreamConnectFailures.Add(1)
+			}
 			g.cfg.Log.Warn("UDP SOCKS associate failed", "target", target, "error", err)
 			return
 		}
@@ -402,16 +461,24 @@ func (g *Gateway) reap() {
 		case <-g.ctx.Done():
 			return
 		case now := <-timer.C:
-			var expired []*flow
-			g.mu.Lock()
-			for f := range g.flows {
-				if now.Sub(time.Unix(0, f.last.Load())) > g.cfg.IdleTimeout {
-					expired = append(expired, f)
-				}
-			}
-			g.mu.Unlock()
-			for _, f := range expired {
-				f.close()
+			g.expireIdleFlows(now)
+		}
+	}
+}
+
+func (g *Gateway) expireIdleFlows(now time.Time) {
+	g.mu.Lock()
+	flows := make([]*flow, 0, len(g.flows))
+	for f := range g.flows {
+		flows = append(flows, f)
+	}
+	g.mu.Unlock()
+	for _, f := range flows {
+		if f.closeIfIdle(now) {
+			if f.tcp {
+				g.tcpIdleExpirations.Add(1)
+			} else {
+				g.udpIdleExpirations.Add(1)
 			}
 		}
 	}
@@ -421,7 +488,13 @@ func (g *Gateway) Stats() Snapshot {
 	g.mu.Lock()
 	active := len(g.flows)
 	g.mu.Unlock()
-	return Snapshot{g.in.Load(), g.out.Load(), g.rejected.Load(), g.failures.Load(), g.tcpFlows.Load(), g.udpFlows.Load(), active}
+	return Snapshot{
+		PacketsIn: g.in.Load(), PacketsOut: g.out.Load(), Rejected: g.rejected.Load(),
+		Errors: g.failures.Load(), TCPFlows: g.tcpFlows.Load(), UDPFlows: g.udpFlows.Load(), Active: active,
+		BytesIn: g.bytesIn.Load(), BytesOut: g.bytesOut.Load(),
+		UpstreamConnectFailures: g.upstreamConnectFailures.Load(), FlowLimitRejections: g.flowLimitRejections.Load(),
+		TCPIdleExpirations: g.tcpIdleExpirations.Load(), UDPIdleExpirations: g.udpIdleExpirations.Load(),
+	}
 }
 
 func (g *Gateway) Close() error {

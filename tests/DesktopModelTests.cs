@@ -33,6 +33,15 @@ internal static class DesktopModelTests
             File.WriteAllText(manifest, "{broken"); Check(reader.Read(now).State == "unavailable", "Corrupt state fails visibly");
             File.Delete(manifest); Check(reader.Read(now).State == "stopped", "Absent state is stopped");
             Check(Json.Time("2026-09-20T02:00:00.123456789+08:00") != DateTime.MinValue, "Go nanosecond timestamps accepted");
+            var bytesHistory = new RateHistory();
+            var firstBytes = Sample(now, "bytes", 10, 20); firstBytes.HasBytes = true; firstBytes.InBytes = 100; firstBytes.OutBytes = 200;
+            var nextBytes = Sample(now.AddSeconds(5), "bytes", 20, 40); nextBytes.HasBytes = true; nextBytes.InBytes = 625100; nextBytes.OutBytes = 1250200;
+            bytesHistory.Update(firstBytes); bytesHistory.Update(nextBytes);
+            Check(bytesHistory.Current.InMbps == 1 && bytesHistory.Current.OutMbps == 2, "Mbps comes from byte differences, not packet counts");
+            nextBytes = Sample(now.AddSeconds(10), "bytes", 1, 2); nextBytes.HasBytes = true; nextBytes.InBytes = 1; nextBytes.OutBytes = 2;
+            bytesHistory.Update(nextBytes); Check(bytesHistory.Current.InMbps == 0 && bytesHistory.Current.OutMbps == 0, "Counter decreases cannot create bandwidth spikes");
+            bytesHistory.Update(new Snapshot { State = "degraded", Fresh = true, HasStats = true });
+            Check(bytesHistory.Current == null, "Degraded health pauses live chart");
             Console.WriteLine("Passed " + checks + " desktop model checks.");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }

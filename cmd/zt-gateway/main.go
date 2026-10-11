@@ -23,13 +23,14 @@ import (
 
 	"github.com/Luase233/zerobridge-mihomo/internal/divert"
 	"github.com/Luase233/zerobridge-mihomo/internal/gateway"
+	"github.com/Luase233/zerobridge-mihomo/internal/health"
 	"github.com/Luase233/zerobridge-mihomo/internal/preflight"
 	"github.com/Luase233/zerobridge-mihomo/internal/probe"
 	"github.com/Luase233/zerobridge-mihomo/internal/settings"
 	"golang.org/x/sys/windows"
 )
 
-const version = "0.3.1"
+const version = "0.3.2"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -51,6 +52,7 @@ func run(log *slog.Logger) error {
 	configPath := fs.String("config", "gateway.json", "configuration path")
 	duration := fs.Duration("duration", 0, "capture/proxy duration; zero runs until stopped")
 	readyFile := fs.String("ready-file", "", "atomic readiness JSON path")
+	healthFile := fs.String("health-file", "", "proxy health heartbeat; defaults beside ready-file")
 	guardPID := fs.Uint("guard-pid", 0, "independent guard process required by proxy mode")
 	guardReadyFile := fs.String("guard-ready-file", "", "readiness proof from the independent guard")
 	if err := fs.Parse(os.Args[2:]); err != nil {
@@ -128,8 +130,12 @@ func run(log *slog.Logger) error {
 	}
 	defer h.Close()
 	var g *gateway.Gateway
+	var monitor *health.Monitor
 	if mode == "proxy" {
-		g, err = gateway.New(gateway.Config{Source: netip.MustParseAddr(c.SourceIP), Proxy: c.Proxy, DNS: c.DNS, MTU: c.MTU, MaxFlows: c.MaxFlows, IdleTimeout: time.Duration(c.IdleTimeoutSeconds) * time.Second, Log: log, WritePacket: func(packet []byte) error { return h.Send(packet, c.InterfaceIndex) }})
+		monitor = health.New(c.InterfaceIndex)
+		g, err = gateway.New(gateway.Config{Source: netip.MustParseAddr(c.SourceIP), Proxy: c.Proxy, DNS: c.DNS, MTU: c.MTU, MaxFlows: c.MaxFlows, IdleTimeout: time.Duration(c.IdleTimeoutSeconds) * time.Second, TCPIdleTimeout: time.Duration(c.TCPIdleTimeoutSeconds) * time.Second, Log: log, WritePacket: func(packet []byte) error {
+			return sendReturnPacket(monitor, h.Send, packet)
+		}})
 		if err != nil {
 			return err
 		}
@@ -137,6 +143,38 @@ func run(log *slog.Logger) error {
 	}
 	if err = writeReady(*readyFile, mode, c); err != nil {
 		return err
+	}
+	var heartbeat *healthHeartbeat
+	if monitor != nil {
+		if *healthFile == "" && *readyFile != "" {
+			*healthFile = filepath.Join(filepath.Dir(*readyFile), "proxy.health.json")
+		}
+		heartbeat, err = newHealthHeartbeat(*healthFile, c)
+		if err != nil {
+			return err
+		}
+		if err = heartbeat.Write(monitor.Snapshot()); err != nil {
+			return err
+		}
+		go func() {
+			check := func() {
+				err := health.CheckSOCKSDNS(ctx, c.Proxy, c.DNS)
+				if ctx.Err() == nil {
+					monitor.UpdateUpstream(err, time.Now())
+				}
+			}
+			check()
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					check()
+				}
+			}
+		}()
 	}
 	log.Info("ready", "mode", mode, "ipv4_only", true, "dns_override", c.DNS)
 	var packets, bytes, rejected atomic.Uint64
@@ -152,7 +190,7 @@ func run(log *slog.Logger) error {
 			}
 			count := packets.Add(1)
 			bytes.Add(uint64(n))
-			if dropAll.Load() {
+			if dropAll.Load() || (monitor != nil && monitor.ReturnIndex() == 0) {
 				rejected.Add(1)
 				continue
 			}
@@ -193,10 +231,24 @@ func run(log *slog.Logger) error {
 					// retain it and consume/drop all subsequent client packets.
 					guardFailed = true
 					dropAll.Store(true)
+					monitor.GuardFailed()
 					log.Error("guard exited; proxy retains interception and drops client packets; close phone default route before Stop.ps1")
 				}
 			}
 		case <-ticker.C:
+			if monitor != nil {
+				oldIndex := monitor.ReturnIndex()
+				updated := c
+				e := settings.ResolveInterface(&updated)
+				monitor.UpdateInterface(updated.InterfaceIndex, e)
+				if current := monitor.ReturnIndex(); current != oldIndex {
+					log.Warn("return_interface_changed", "previous", oldIndex, "current", current, "error", e, "interception_retained", true)
+				}
+				if e = heartbeat.Write(monitor.Snapshot()); e != nil {
+					// A reporting failure must not release the protection handles.
+					log.Error("health_heartbeat_failed", "error", e)
+				}
+			}
 			if g != nil {
 				log.Info("stats", "gateway", g.Stats(), "dropped", rejected.Load())
 			} else {
@@ -210,13 +262,6 @@ func writeReady(path, mode string, c settings.Config) error {
 	if path == "" {
 		return nil
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	if err = os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
-		return err
-	}
 	configHash, err := hashConfig(c)
 	if err != nil {
 		return err
@@ -225,7 +270,21 @@ func writeReady(path, mode string, c settings.Config) error {
 	if err != nil {
 		return err
 	}
-	b, err := json.Marshal(map[string]any{"pid": os.Getpid(), "mode": mode, "version": version, "source": c.SourceIP, "interface_index": c.InterfaceIndex, "ready_utc": time.Now().UTC().Format(time.RFC3339Nano), "config_sha256": configHash, "process_start_filetime": start})
+	return writeAtomicJSON(path, map[string]any{"pid": os.Getpid(), "mode": mode, "version": version, "source": c.SourceIP, "interface_index": c.InterfaceIndex, "ready_utc": time.Now().UTC().Format(time.RFC3339Nano), "config_sha256": configHash, "process_start_filetime": start})
+}
+
+func writeAtomicJSON(path string, value any) error {
+	if path == "" {
+		return nil
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
+		return err
+	}
+	b, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
@@ -278,14 +337,7 @@ func verifyGuard(pid uint32, readyPath string, c settings.Config) (windows.Handl
 	if err != nil {
 		return 0, err
 	}
-	var ready struct {
-		PID       uint32 `json:"pid"`
-		Mode      string `json:"mode"`
-		Source    string `json:"source"`
-		Interface uint32 `json:"interface_index"`
-		Config    string `json:"config_sha256"`
-		Start     string `json:"process_start_filetime"`
-	}
+	var ready guardReadiness
 	if err = json.Unmarshal(proof, &ready); err != nil {
 		return 0, err
 	}
@@ -297,8 +349,8 @@ func verifyGuard(pid uint32, readyPath string, c settings.Config) (windows.Handl
 	if err != nil {
 		return 0, err
 	}
-	if ready.PID != pid || ready.Mode != "guard" || ready.Source != c.SourceIP || ready.Interface != c.InterfaceIndex || ready.Config != wantHash || ready.Start != wantStart {
-		return 0, errors.New("guard readiness does not match process, phone, interface and exact configuration")
+	if err = validateGuardProof(ready, pid, wantHash, wantStart, c.SourceIP); err != nil {
+		return 0, err
 	}
 	status, err := windows.WaitForSingleObject(h, 0)
 	if err != nil || status != uint32(windows.WAIT_TIMEOUT) {
@@ -306,6 +358,24 @@ func verifyGuard(pid uint32, readyPath string, c settings.Config) (windows.Handl
 	}
 	failed = false
 	return h, nil
+}
+
+type guardReadiness struct {
+	PID       uint32 `json:"pid"`
+	Mode      string `json:"mode"`
+	Source    string `json:"source"`
+	Interface uint32 `json:"interface_index"`
+	Config    string `json:"config_sha256"`
+	Start     string `json:"process_start_filetime"`
+}
+
+func validateGuardProof(ready guardReadiness, pid uint32, wantHash, wantStart, source string) error {
+	// Guard filters only the configured source address. The return interface can
+	// legitimately change while this same independently verified guard remains.
+	if ready.PID != pid || ready.Mode != "guard" || ready.Source != source || ready.Config != wantHash || ready.Start != wantStart {
+		return errors.New("guard readiness does not match process, phone and exact configuration")
+	}
+	return nil
 }
 
 func hashConfig(c settings.Config) (string, error) {

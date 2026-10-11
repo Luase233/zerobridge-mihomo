@@ -10,17 +10,20 @@ import (
 	"path/filepath"
 )
 
+const DefaultTCPIdleTimeoutSeconds = 1800
+
 type Config struct {
-	SourceIP           string `json:"source_ip"`
-	WindowsIP          string `json:"windows_ip"`
-	InterfaceIndex     uint32 `json:"interface_index"`
-	Proxy              string `json:"proxy"`
-	DNS                string `json:"dns"`
-	MTU                uint32 `json:"mtu"`
-	MaxFlows           int    `json:"max_flows"`
-	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
-	WinDivertDLL       string `json:"windivert_dll"`
-	File               string `json:"-"`
+	SourceIP              string `json:"source_ip"`
+	WindowsIP             string `json:"windows_ip"`
+	InterfaceIndex        uint32 `json:"interface_index"`
+	Proxy                 string `json:"proxy"`
+	DNS                   string `json:"dns"`
+	MTU                   uint32 `json:"mtu"`
+	MaxFlows              int    `json:"max_flows"`
+	IdleTimeoutSeconds    int    `json:"idle_timeout_seconds"`
+	TCPIdleTimeoutSeconds int    `json:"tcp_idle_timeout_seconds"`
+	WinDivertDLL          string `json:"windivert_dll"`
+	File                  string `json:"-"`
 }
 
 func Load(path string) (Config, error) {
@@ -43,6 +46,9 @@ func Load(path string) (Config, error) {
 		return c, errors.New("config must contain exactly one JSON object")
 	}
 	c.File = absolute
+	if c.TCPIdleTimeoutSeconds == 0 {
+		c.TCPIdleTimeoutSeconds = DefaultTCPIdleTimeoutSeconds
+	}
 	if err = c.Validate(); err != nil {
 		return c, err
 	}
@@ -82,6 +88,11 @@ func (c Config) Validate() error {
 	}
 	if c.IdleTimeoutSeconds < 15 || c.IdleTimeoutSeconds > 600 {
 		return errors.New("idle timeout must be 15..600 seconds")
+	}
+	// Zero remains valid for callers constructing Config directly: the gateway
+	// supplies the same default that Load applies to older JSON configuration.
+	if c.TCPIdleTimeoutSeconds != 0 && (c.TCPIdleTimeoutSeconds < 120 || c.TCPIdleTimeoutSeconds > 86400) {
+		return errors.New("TCP idle timeout must be 120..86400 seconds")
 	}
 	if filepath.Base(c.WinDivertDLL) != "WinDivert.dll" {
 		return fmt.Errorf("invalid WinDivert DLL filename")

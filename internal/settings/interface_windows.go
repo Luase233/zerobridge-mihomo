@@ -18,12 +18,16 @@ func ResolveInterface(c *Config) error {
 	if err != nil {
 		return fmt.Errorf("enumerate network interfaces: %w", err)
 	}
+	return resolveInterfaces(c, interfaces, func(iface net.Interface) ([]net.Addr, error) { return iface.Addrs() })
+}
+
+func resolveInterfaces(c *Config, interfaces []net.Interface, addressesFor func(net.Interface) ([]net.Addr, error)) error {
 	var matches []uint32
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || !strings.HasPrefix(iface.Name, "ZeroTier One [") {
 			continue
 		}
-		addresses, err := iface.Addrs()
+		addresses, err := addressesFor(iface)
 		if err != nil {
 			return fmt.Errorf("read ZeroTier addresses: %w", err)
 		}

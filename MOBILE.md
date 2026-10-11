@@ -6,6 +6,8 @@
 
 通过 ZeroTier 连接 Windows，在 iPhone 网页上选择已有 Clash / Mihomo 的代理节点。界面与桌面使用同一套深蓝与青绿色设计；电脑端同步显示最近 20 条命令、来源、目标节点和执行结果。
 
+v0.3.2 在恢复网络、返回前台或重新显示页面时取消旧状态请求并重新读取；配对密钥和手动代理组保持不变。正在执行的切换/测速命令不会被自动重发，超时后仍需查看记录与实际选择。页面刷新恢复的是控制界面，底层 ZeroTier 连接仍由 ZeroTier 管理。
+
 ### 安装到已配置的 Windows 网关
 
 需要 Go、已安装的网关、Windows .NET Framework 4.x，以及 Clash 已开启的本机命名管道控制接口。默认管道为 `\\.\pipe\verge-mihomo`；本项目不会修改 Clash 配置。若使用其他管道，通过安装器的 `-Pipe` 参数指定。当前不支持通过远程 HTTP 控制器连接 Clash。
@@ -28,7 +30,7 @@
 
 ### 仅更新已有手机控制与桌面
 
-从包含 v0.3.1 源码的独立目录构建，然后在管理员 PowerShell 执行；任务所属用户须已登录，Clash 及 ZeroTier 应保持在线：
+从包含 v0.3.2 源码的独立目录构建，然后在管理员 PowerShell 执行；任务所属用户须已登录，Clash 及 ZeroTier 应保持在线：
 
 ```powershell
 & .\scripts\Build-Mobile.ps1
@@ -36,7 +38,7 @@
 & .\scripts\Update-Control.ps1 -GatewayRoot C:\ZeroTierGateway
 ```
 
-更新器先对新程序进行只读 Clash 检查，再备份并核验两个已安装控制程序的 SHA-256，仅停止对应手机与托盘任务以及路径已核验的控制程序。它保留配置、配对二维码、防火墙和任务设置，不停止原网关、不操作 NAT。重启后需读到新的 v0.3.1 在线心跳；失败时尝试恢复旧程序，备份目录仅管理员与 SYSTEM 可访问。自定义任务动作或链接目录会被拒绝。恢复失败时保留备份，按错误说明检查控制任务。
+更新器先对新程序进行只读 Clash 检查，再备份并核验两个已安装控制程序的 SHA-256，仅停止对应手机与托盘任务以及路径已核验的控制程序。它保留配置、配对二维码、防火墙和任务设置，不停止原网关、不操作 NAT。重启后需读到新的 v0.3.2 在线心跳；失败时尝试恢复旧程序，备份目录仅管理员与 SYSTEM 可访问。自定义任务动作或链接目录会被拒绝。恢复失败时保留备份，按错误说明检查控制任务。
 
 完成后刷新 iPhone Safari 页面，或彻底关闭并重开主屏幕 App，使页面加载新版。已有配对密钥继续可用；只更新控制界面无需关闭手机 Default Route。
 
@@ -72,6 +74,8 @@
 
 Connect iPhone to Windows through ZeroTier and select nodes already configured in Clash / Mihomo. The mobile page shares the desktop's navy and teal design. The desktop shows the last twenty commands, their source, target and result.
 
+v0.3.2 cancels old state requests and reads fresh state when connectivity returns, the page becomes visible or Safari shows it again. Pairing and the manual group persist. Pending selection/delay commands are never replayed automatically; after a timeout, inspect the command record and actual selection. This restores the control page; ZeroTier manages the underlying network connection.
+
 ### Install on a configured Windows gateway
 
 Requires Go, an existing gateway installation, Windows .NET Framework 4.x and an enabled local Clash named-pipe controller. The default is `\\.\pipe\verge-mihomo`; use the installer's `-Pipe` argument for another local pipe. The project does not modify Clash configuration and does not currently connect to remote HTTP controllers.
@@ -94,7 +98,7 @@ The installer reads the actual addresses and interface index from `gateway.json`
 
 ### Update existing mobile control and desktop only
 
-Build from a separate checkout containing the v0.3.1 source, then run in administrator PowerShell. The tasks' user must be logged on, with Clash and ZeroTier online:
+Build from a separate checkout containing the v0.3.2 source, then run in administrator PowerShell. The tasks' user must be logged on, with Clash and ZeroTier online:
 
 ```powershell
 & .\scripts\Build-Mobile.ps1
@@ -102,7 +106,7 @@ Build from a separate checkout containing the v0.3.1 source, then run in adminis
 & .\scripts\Update-Control.ps1 -GatewayRoot C:\ZeroTierGateway
 ```
 
-The updater runs a read-only Clash check before stopping anything, backs up both installed control binaries, and verifies copied files by SHA-256. It stops only the corresponding mobile/tray tasks and control processes whose executable paths were verified. It preserves configuration, pairing QR, firewall and task settings, leaves the gateway running, and performs no NAT operation. Restart must produce a fresh v0.3.1 online heartbeat; failures trigger an attempt to restore the old binaries. Backups are accessible only to administrators and SYSTEM. Custom task actions and linked directories are rejected. Keep the backups and inspect the control tasks if rollback is incomplete.
+The updater runs a read-only Clash check before stopping anything, backs up both installed control binaries, and verifies copied files by SHA-256. It stops only the corresponding mobile/tray tasks and control processes whose executable paths were verified. It preserves configuration, pairing QR, firewall and task settings, leaves the gateway running, and performs no NAT operation. Restart must produce a fresh v0.3.2 online heartbeat; failures trigger an attempt to restore the old binaries. Backups are accessible only to administrators and SYSTEM. Custom task actions and linked directories are rejected. Keep the backups and inspect the control tasks if rollback is incomplete.
 
 After updating, refresh the Safari page or fully close and reopen the Home Screen app to load the new page. Existing pairing credentials remain valid; a control-only update does not require disabling the phone's Default Route.
 

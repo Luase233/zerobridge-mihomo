@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -33,16 +34,21 @@ type mockSOCKS struct {
 	mu          sync.Mutex
 	connections []io.Closer
 	targets     chan netip.AddrPort
+	tcpHandler  func(net.Conn)
 	wg          sync.WaitGroup
 }
 
 func newMock(t *testing.T) *mockSOCKS {
+	return newMockTCP(t, nil)
+}
+
+func newMockTCP(t *testing.T, tcpHandler func(net.Conn)) *mockSOCKS {
 	t.Helper()
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &mockSOCKS{l: l, targets: make(chan netip.AddrPort, 32)}
+	m := &mockSOCKS{l: l, targets: make(chan netip.AddrPort, 32), tcpHandler: tcpHandler}
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -91,7 +97,11 @@ func (m *mockSOCKS) serve(c net.Conn) {
 		if _, err := c.Write([]byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 1}); err != nil {
 			return
 		}
-		io.Copy(c, c)
+		if m.tcpHandler != nil {
+			m.tcpHandler(c)
+		} else {
+			io.Copy(c, c)
+		}
 	case 3:
 		u, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 		if err != nil {
@@ -133,8 +143,11 @@ func harness(t *testing.T, maxFlows int, idle time.Duration) (*Gateway, *stack.S
 }
 
 func harnessDropReturn(t *testing.T, maxFlows int, idle time.Duration, drop func([]byte) bool) (*Gateway, *stack.Stack, *mockSOCKS) {
+	return harnessMock(t, maxFlows, idle, drop, newMock(t))
+}
+
+func harnessMock(t *testing.T, maxFlows int, idle time.Duration, drop func([]byte) bool, m *mockSOCKS) (*Gateway, *stack.Stack, *mockSOCKS) {
 	t.Helper()
-	m := newMock(t)
 	phone := netip.MustParseAddr("10.147.20.2")
 	link := channel.New(512, 1280, "")
 	s := stack.New(stack.Options{NetworkProtocols: []stack.NetworkProtocolFactory{ipv4.NewProtocol}, TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol}})
@@ -224,6 +237,9 @@ func TestTCPPacketsSOCKSHandshakeAndReturn(t *testing.T) {
 	expectTarget(t, m, "203.0.113.7:443")
 	if g.Stats().PacketsIn == 0 || g.Stats().PacketsOut == 0 {
 		t.Fatal("no bidirectional packets")
+	}
+	if got := g.Stats(); got.BytesIn <= uint64(len(payload)) || got.BytesOut <= uint64(len(payload)) {
+		t.Fatalf("raw IPv4 byte counters omit payload or headers: %+v", got)
 	}
 }
 
@@ -415,7 +431,7 @@ func TestIdleExpiryAndFlowCap(t *testing.T) {
 	if _, err = c2.Read(b[:]); err == nil {
 		t.Fatal("flow cap did not reject second flow")
 	}
-	if got := g.Stats(); got.Active != 1 || got.Rejected == 0 {
+	if got := g.Stats(); got.Active != 1 || got.Rejected == 0 || got.FlowLimitRejections == 0 {
 		t.Fatalf("unexpected cap stats: %+v", got)
 	}
 	deadline := time.Now().Add(4 * time.Second)
@@ -425,6 +441,232 @@ func TestIdleExpiryAndFlowCap(t *testing.T) {
 	if g.Stats().Active != 0 {
 		t.Fatal("idle flow not reaped")
 	}
+}
+
+func waitActive(t *testing.T, g *Gateway, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for g.Stats().Active != want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := g.Stats().Active; got != want {
+		t.Fatalf("active flows = %d, want %d", got, want)
+	}
+}
+
+// Establish real packet-to-SOCKS streams, age them past the UDP idle threshold,
+// and verify that TCP still transfers data without waiting minutes in a test.
+func TestTCPIdleSurvivesUDPExpiryAndEventuallyReclaims(t *testing.T) {
+	g, s, m := harness(t, 16, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := gonet.DialContextTCP(ctx, s, destination("203.0.113.21", 443), ipv4.ProtocolNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	echo := func(payload string) {
+		t.Helper()
+		if _, err := c.Write([]byte(payload)); err != nil {
+			t.Fatal(err)
+		}
+		b := make([]byte, len(payload))
+		if _, err := io.ReadFull(c, b); err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != payload {
+			t.Fatal("TCP roundtrip changed payload")
+		}
+	}
+	echo("before quiet period")
+	expectTarget(t, m, "203.0.113.21:443")
+	dst := destination("203.0.113.22", 443)
+	u, err := gonet.DialUDP(s, nil, &dst, ipv4.ProtocolNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Close()
+	u.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err = u.Write([]byte("udp")); err != nil {
+		t.Fatal(err)
+	}
+	var b [3]byte
+	if _, err = u.Read(b[:]); err != nil {
+		t.Fatal(err)
+	}
+	expectTarget(t, m, "203.0.113.22:443")
+	if g.cfg.TCPIdleTimeout != 30*time.Minute {
+		t.Fatal("missing TCP default does not preserve long-lived connections")
+	}
+	now := time.Now()
+	g.mu.Lock()
+	for f := range g.flows {
+		f.mu.Lock()
+		f.last = now.Add(-2 * time.Second)
+		f.mu.Unlock()
+	}
+	g.mu.Unlock()
+	g.expireIdleFlows(now)
+	waitActive(t, g, 1)
+	echo("after UDP idle timeout")
+	if got := g.Stats(); got.TCPIdleExpirations != 0 || got.UDPIdleExpirations != 1 {
+		t.Fatalf("wrong protocol idle accounting: %+v", got)
+	}
+	g.expireIdleFlows(time.Now().Add(31 * time.Minute))
+	waitActive(t, g, 0)
+	g.expireIdleFlows(time.Now().Add(32 * time.Minute))
+	if got := g.Stats(); got.TCPIdleExpirations != 1 || got.UDPIdleExpirations != 1 {
+		t.Fatalf("idle cleanup double-counted or leaked: %+v", got)
+	}
+}
+
+func TestIdleDecisionRespectsRecentActivityAndBoundary(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	now := time.Now()
+	f := &flow{ctx: ctx, cancel: cancel, last: now.Add(-30 * time.Minute), idleTimeout: 30 * time.Minute}
+	if f.closeIfIdle(now) {
+		t.Fatal("closed at the exact idle threshold")
+	}
+	// An active copy worker refreshes the timestamp before the reaper decides.
+	f.mu.Lock()
+	f.last = now.Add(-31 * time.Minute)
+	f.mu.Unlock()
+	f.touch()
+	if f.closeIfIdle(now) {
+		t.Fatal("recent application activity did not extend TCP lifetime")
+	}
+	if !f.closeIfIdle(now.Add(31*time.Minute)) || f.closeIfIdle(now.Add(32*time.Minute)) {
+		t.Fatal("expired flow was not closed exactly once")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("idle expiry did not cancel SOCKS operations")
+	}
+}
+
+func TestTCPHalfCloseAllowsResponseAndNaturalCleanup(t *testing.T) {
+	m := newMockTCP(t, func(c net.Conn) {
+		request, err := io.ReadAll(c)
+		if err == nil {
+			_, _ = c.Write(append([]byte("reply:"), request...))
+		}
+	})
+	g, s, _ := harnessMock(t, 16, time.Second, nil, m)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := gonet.DialContextTCP(ctx, s, destination("203.0.113.23", 443), ipv4.ProtocolNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err = c.Write([]byte("request")); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(c)
+	if err != nil || string(got) != "reply:request" {
+		t.Fatalf("half-close lost reverse response: %q, %v", got, err)
+	}
+	waitActive(t, g, 0)
+	if got := g.Stats(); got.TCPIdleExpirations != 0 || got.UDPIdleExpirations != 0 {
+		t.Fatalf("natural close was reported as idle expiry: %+v", got)
+	}
+}
+
+func TestUnavailableSOCKSCountsUpstreamFailureAndReclaimsFlow(t *testing.T) {
+	for _, tcpFlow := range []bool{true, false} {
+		name := "UDP"
+		if tcpFlow {
+			name = "TCP"
+		}
+		t.Run(name, func(t *testing.T) {
+			g, s, m := harness(t, 16, time.Second)
+			// Remove only the independent loopback proxy, leaving the simulated
+			// phone link and gateway healthy. No public endpoint is contacted.
+			m.l.Close()
+			var c net.Conn
+			var err error
+			if tcpFlow {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				c, err = gonet.DialContextTCP(ctx, s, destination("203.0.113.24", 443), ipv4.ProtocolNumber)
+			} else {
+				dst := destination("203.0.113.24", 443)
+				c, err = gonet.DialUDP(s, nil, &dst, ipv4.ProtocolNumber)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			c.SetDeadline(time.Now().Add(5 * time.Second))
+			_, _ = c.Write([]byte("trigger upstream negotiation"))
+			deadline := time.Now().Add(3 * time.Second)
+			for g.Stats().UpstreamConnectFailures == 0 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			waitActive(t, g, 0)
+			if got := g.Stats(); got.UpstreamConnectFailures != 1 || got.Errors != 1 || got.FlowLimitRejections != 0 || got.TCPIdleExpirations != 0 || got.UDPIdleExpirations != 0 {
+				t.Fatalf("upstream outage misclassified: %+v", got)
+			}
+		})
+	}
+}
+
+// Opt-in soak check uses actual elapsed time and the production legacy UDP
+// idle value. It is intentionally separate from the fast deterministic suite.
+func TestLongTCPIdleBeyondLegacyTimeout(t *testing.T) {
+	if os.Getenv("ZEROBRIDGE_LONG_TCP_TEST") != "1" {
+		t.Skip("set ZEROBRIDGE_LONG_TCP_TEST=1 to verify an actual 125-second TCP idle period")
+	}
+	m := newMockTCP(t, func(c net.Conn) {
+		_ = c.SetDeadline(time.Time{})
+		_, _ = io.Copy(c, c)
+	})
+	g, s, _ := harnessMock(t, 16, 120*time.Second, nil, m)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := gonet.DialContextTCP(ctx, s, destination("203.0.113.25", 443), ipv4.ProtocolNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	echo := func(payload string) {
+		t.Helper()
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := c.Write([]byte(payload)); err != nil {
+			t.Fatal(err)
+		}
+		b := make([]byte, len(payload))
+		if _, err := io.ReadFull(c, b); err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != payload {
+			t.Fatal("same TCP stream returned a changed payload")
+		}
+	}
+	echo("before actual idle")
+	_ = c.SetDeadline(time.Time{})
+	if g.cfg.TCPIdleTimeout != 30*time.Minute {
+		t.Fatal("TCP did not use the production default")
+	}
+	started := time.Now()
+	t.Log("holding an established packet-to-SOCKS TCP stream idle for 125 seconds")
+	timer := time.NewTimer(125 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		t.Fatal("long TCP idle check canceled")
+	}
+	echo("after actual idle")
+	if got := g.Stats(); got.Active != 1 || got.TCPIdleExpirations != 0 || got.Errors != 0 {
+		t.Fatalf("TCP failed during real elapsed quiet time: %+v", got)
+	}
+	t.Logf("same TCP stream echoed successfully after %s idle", time.Since(started))
 }
 
 func TestSourceAndProtocolBoundary(t *testing.T) {

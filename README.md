@@ -6,9 +6,9 @@
 
 Windows amd64 · TCP / UDP / DNS · 无 TUN · 桌面面板与托盘 · MIT
 
-[v0.3.1 实验性预发布](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.1) · [界面与托盘](DESKTOP.md) · [更新日志](CHANGELOG.md) · [开机自启](AUTOSTART.zh-CN.md) · [验证范围（English）](VALIDATION.md)
+[v0.3.2 实验性预发布](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.2) · [界面与托盘](DESKTOP.md) · [更新日志](CHANGELOG.md) · [开机自启](AUTOSTART.zh-CN.md) · [验证范围（English）](VALIDATION.md)
 
-**v0.3.1：** 手机控制显示各节点的已有延迟，并可测量当前组；默认代理组按 Clash 模式与规则选择，切换结果同时说明该组是否位于当前模式选中的出站路径中。Windows 重新分配 ZeroTier 网卡编号时，网关按配置的 Windows ZeroTier 地址及客户端子网识别当前接口；`interface_index` 仍保留为提示值，必须匹配唯一的活动 ZeroTier 网卡才会启动。
+**v0.3.2：** TCP 空闲期限与 UDP 分开，旧配置自动使用 30 分钟 TCP 空闲期限，避免两分钟无业务数据就主动断开。运行期间重新识别 ZeroTier 网卡，网卡暂时消失时保留捕获与保护，恢复后更新回包接口；带滞后的 SOCKS/DNS 健康检查反映恢复状态。UDP 缓冲复用减少内存分配，桌面增加实际 IPv4 收发 Mbps，手机页面在切网或返回前台后重新读取状态。保留节点延迟与两端切换确认。
 
 > 本项目仅提供本地转发与协议转换功能，**不提供或运营 VPN 服务、代理节点、订阅或网络出口服务**。ZeroTier 网络和上游代理均由使用者自行配置。完整说明见[项目使用声明](DISCLAIMER.md)。
 
@@ -32,13 +32,14 @@ flowchart TD
 ## 功能
 
 - **iPhone 手机控制：** 同款网页可添加到主屏幕，扫码配对、搜索并切换 Clash 手动代理组节点、显示与测量节点延迟；按当前模式推荐代理组，电脑端同步确认结果与出站说明。见[手机控制说明](MOBILE.md)。
-- **交互界面与托盘：** 中英文运行面板、收发包速率 / 活动连接图表、日志入口、带确认和 UAC 的启动/停止，以及独立的用户登录自启。见[桌面使用说明](DESKTOP.md)。
+- **交互界面与托盘：** 中英文运行面板、IPv4 上传/下载 Mbps、收发包速率 / 活动连接图表、日志入口、带确认和 UAC 的启动/停止，以及独立的用户登录自启。见[桌面使用说明](DESKTOP.md)。
 - **单客户端范围：** filter 为 `ip and ip.SrcAddr == <source_ip>`，只作用于转发层。Windows 本机、Mihomo 出站和 ZeroTier 外层连接不匹配这一过滤器。
 - **TCP 与 UDP：** TCP 使用 SOCKS CONNECT；UDP 使用 UDP ASSOCIATE。上游和 UDP relay 限于本机回环地址，没有代理失败后直连的回退。
 - **DNS：** 转发路径上的普通 TCP/UDP 53 请求改写到配置的公网 DNS，并经 SOCKS 发送。本地接收及同网段直接通信不在捕获范围内。
 - **协议处理：** 复用 tun2socks core 的进程内 gVisor 栈，处理分段、重传、IPv4 分片与回包校验和，不加载其 TUN 设备。
 - **故障保护：** proxy 退出时，独立 guard 丢弃匹配流量；guard 退出时，proxy 保留捕获句柄并进入丢弃模式。
 - **可选自启：** SYSTEM 计划任务、High 优先级、依赖等待和子进程恢复。
+- **运行时恢复：** 每 5 秒核对唯一匹配的活动 ZeroTier 网卡；每 30 秒通过现有 SOCKS 向配置 DNS 发起有时限的 TCP 查询，连续 3 次失败标记降级、连续 2 次成功恢复。此检查不代表手机到电脑链路的质量，不因单次探测失败重启所有连接或改变节点。
 
 ## 开始前确认
 
@@ -87,7 +88,8 @@ Copy-Item .\gateway.example.json .\gateway.json
 | `dns` | 公网 IPv4 DNS，端口 53；默认 `1.1.1.1:53` |
 | `mtu` | 默认 1280，范围 1280–1500 |
 | `max_flows` | 默认 256，范围 1–1024 |
-| `idle_timeout_seconds` | 默认 120，范围 15–600 |
+| `idle_timeout_seconds` | UDP 空闲期限；默认 120，范围 15–600 秒 |
+| `tcp_idle_timeout_seconds` | TCP 空闲期限；缺省/0 使用 1800 秒（30 分钟），显式值范围 120–86400 秒 |
 | `windivert_dll` | 默认 `runtime/WinDivert.dll`，相对配置文件解析 |
 
 **NAT 模板需单独核对。** `scripts/Nat.ps1` 仍限定 `ZeroTierNAT` 和示例前缀 `10.147.20.0/24`。使用其他网段前，审阅并调整 `$expectedPrefix`，以及 `scripts/Inspect.ps1` 的 `Expected` 字段。只修改 JSON 不会让脚本管理另一条 NAT；不匹配时会拒绝操作。
@@ -102,6 +104,19 @@ Copy-Item .\gateway.example.json .\gateway.json
 ```
 
 检查接口、转发状态、NAT、驱动签名和哈希，并通过现有 SOCKS 测试 TCP DNS、UDP DNS 和 HTTPS 出口。探测访问配置的 DNS 与 api.ipify.org，不加载驱动、不修改网络。
+
+## 更新已安装的开机网关
+
+适用于已经按自启说明安装、存在 `ZeroTierGateway` SYSTEM 任务的网关。先构建新版本，在手机关闭 Default Route，然后从独立源码目录以管理员运行：
+
+```powershell
+go build -trimpath -o bin/zt-gateway.exe ./cmd/zt-gateway
+& .\scripts\Update-Gateway.ps1 -GatewayRoot C:\ZeroTierGateway -PhoneDefaultRouteIsOff
+# 如同时更新手机和桌面控制，先分别构建，再执行：
+& .\scripts\Update-Control.ps1 -GatewayRoot C:\ZeroTierGateway
+```
+
+网关更新器先进行只读预检，备份旧程序与 supervisor、核对哈希和进程身份，再重启已验证的任务；失败时回退旧文件。它保留现有配置、任务设置和 NAT 状态。新版本对缺少 TCP 空闲字段的旧配置自动使用 1800 秒，无需改写配置。确认新鲜的版本及健康状态后，才能重新开启手机 Default Route。临时物理断网、切换节点、服务器主动关闭连接仍可能需要应用重新建立连接。
 
 ## 启动、验证与停止
 

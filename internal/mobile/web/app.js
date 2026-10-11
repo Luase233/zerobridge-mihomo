@@ -217,4 +217,12 @@ if (fragment.has('token')) { $('token').value = fragment.get('token'); history.r
 else { token = storage.get('zb-token'); if (token) refresh() }
 controls();
 setInterval(() => { if (!document.hidden) refresh(true) }, 5000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(true) });
+function resumeConnection() {
+ if (document.hidden || !token || busy) return;
+ // Safari can retain a request from the previous physical network after resume.
+ // Cancel only a state read; a selection command must never be replayed.
+ abortRead(); refresh(true);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && !busy) abortRead(); else resumeConnection() });
+window.addEventListener('online', resumeConnection);
+window.addEventListener('pageshow', resumeConnection);

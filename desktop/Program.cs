@@ -9,7 +9,7 @@ namespace ZeroBridge.Desktop
 {
     internal static class Program
     {
-        public const string Version = "0.3.1";
+        public const string Version = "0.3.2";
         [STAThread]
         private static void Main(string[] args)
         {

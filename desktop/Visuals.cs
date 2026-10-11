@@ -51,7 +51,7 @@ namespace ZeroBridge.Desktop
     internal sealed class TrafficChart : Control
     {
         public RateHistory History;
-        public bool Connections, English;
+        public bool Connections, Bandwidth = true, English;
         public TrafficChart() { DoubleBuffered = true; BackColor = Color.White; AccessibleName = "Gateway traffic chart"; }
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -59,7 +59,7 @@ namespace ZeroBridge.Desktop
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             var area = new RectangleF(54, 14, Math.Max(1, Width - 78), Math.Max(1, Height - 49));
             double max = 1;
-            if (History != null) foreach (var p in History.Points) max = Math.Max(max, Connections ? p.Active : Math.Max(p.InRate, p.OutRate));
+            if (History != null) foreach (var p in History.Points) max = Math.Max(max, Connections ? p.Active : Bandwidth ? Math.Max(p.InMbps, p.OutMbps) : Math.Max(p.InRate, p.OutRate));
             max = Math.Ceiling(max * 1.15);
             using (var pen = new Pen(Style.Line))
             using (var brush = new SolidBrush(Style.Muted))
@@ -71,7 +71,7 @@ namespace ZeroBridge.Desktop
                     g.DrawLine(pen, area.Left, y, area.Right, y);
                     g.DrawString((max * (4 - i) / 4).ToString("0.#"), font, brush, 4, y - 6);
                 }
-                if (History == null || History.Current == null || History.Points.Count < 2)
+                if (History == null || History.Current == null || History.Points.Count < 2 || (!Connections && Bandwidth && !History.Current.HasBytes))
                 {
                     string message = English ? "Waiting for fresh gateway samples…" : "等待网关统计样本…";
                     using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
@@ -96,7 +96,7 @@ namespace ZeroBridge.Desktop
                 foreach (var p in History.Points)
                 {
                     if (p.Time < first) continue;
-                    double value = Connections ? p.Active : outgoing ? p.OutRate : p.InRate;
+                    double value = Connections ? p.Active : Bandwidth ? outgoing ? p.OutMbps : p.InMbps : outgoing ? p.OutRate : p.InRate;
                     var current = new PointF(area.Left + (float)((p.Time - first).TotalSeconds / 600) * area.Width,
                         area.Bottom - (float)(value / max) * area.Height);
                     if (previous.HasValue) g.DrawLine(pen, previous.Value, current);

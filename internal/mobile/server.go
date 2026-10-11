@@ -105,7 +105,7 @@ type State struct {
 	Version        string             `json:"version"`
 }
 
-const Version = "0.3.1"
+const Version = "0.3.2"
 
 type Controller struct{ Client *http.Client }
 

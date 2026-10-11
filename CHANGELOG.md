@@ -2,6 +2,26 @@
 
 [简体中文 README](README.md) · [English README](README.en.md)
 
+## v0.3.2 — 2026-10-11
+
+- 将 TCP / UDP 空闲期限分开：旧配置自动采用 TCP 1800 秒、UDP 沿用原设置（示例 120 秒）；保留 TCP keepalive、半关闭响应及连接上限，避免静默 TCP 两分钟后被主动关闭。
+- 每 5 秒重新识别活动 ZeroTier 回包接口，接口丢失期间保留捕获与 guard，恢复后使用当前编号；独立 guard 身份核验不再依赖可能变化的回包接口编号。
+- 增加受限 SOCKS/TCP DNS 探测与有进程身份和新鲜度验证的健康心跳。连续 3 次失败降级、2 次成功恢复，不因单次异常重启所有连接或切换节点。
+- UDP 收发复用缓冲区，减少每包分配；桌面显示 IPv4 上传/下载 Mbps，日志增加字节、连接失败、上限拒绝与空闲回收计数。
+- 手机页面在返回前台、恢复网络或重新显示时取消旧状态读取并刷新，不重发切换或测速命令。
+- 新增带备份、哈希核验、版本及健康检查和失败回退的开机网关更新器。
+- 保留 PowerShell 7 解析 JSON 时间后的 UTC 类型及偏移，避免健康检查和启动时间误判。
+
+- Separate TCP/UDP idle limits: existing configurations use 1800 seconds for TCP and retain their UDP setting (120 seconds in the example). Preserve keepalive, half-close replies and bounded connections.
+- Re-resolve the ZeroTier return interface every 5 seconds; retain capture and guard during outages and use the current index on recovery. Guard identity remains bound to process/start/source/configuration rather than a dynamic return index.
+- Add bounded SOCKS/TCP DNS probes and owned, fresh health heartbeats. Three failures mark degraded health and two successes recover, without restarting all flows or changing nodes for a transient failure.
+- Reuse UDP buffers; show IPv4 upload/download Mbps and add byte, connection-failure, capacity-rejection and idle-expiration counters.
+- Refresh phone state after resume/network restoration without replaying selection or delay commands.
+- Add a backed-up, hash-checked gateway updater with versioned health validation and rollback.
+- Preserve UTC kinds and offsets after PowerShell 7 JSON parsing to prevent incorrect heartbeat age and startup-time comparisons.
+
+真实本地 TCP 连接空闲 125 秒后仍可继续收发。已部署到验证环境，配置、配对及自启设置保留；用户确认 iPhone 蜂窝连接首次和闲置约三分钟后访问均正常。蜂窝切网和长期外出稳定性仍需实际使用验证。A real local TCP connection remained usable after 125 seconds idle. Deployed with configuration, pairing and autostart settings preserved; the user confirmed cellular access on a physical iPhone both initially and after about three minutes idle. Cellular roaming and long-term outdoor reliability still require real-world observation.
+
 ## v0.3.1 — 2026-10-11
 
 - 手机节点列表显示已有延迟，并增加当前组测速与延迟排序；单节点探测使用固定地址、3 秒超时和受限并发，不清除自动组的固定选择。

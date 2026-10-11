@@ -15,7 +15,11 @@ import (
 	"time"
 )
 
-const handshakeTimeout = 10 * time.Second
+const (
+	handshakeTimeout = 10 * time.Second
+	udpHeaderSize    = 10 // RSV, FRAG and an IPv4 address plus port.
+	maxUDPDatagram   = 65507
+)
 
 type Client struct{ proxy netip.AddrPort }
 
@@ -95,6 +99,13 @@ type Association struct {
 	control net.Conn
 	udp     *net.UDPConn
 	once    sync.Once
+	// A read can wait for a reply while another goroutine sends a datagram.
+	// Separate locks preserve that full-duplex behavior and protect buffers
+	// when multiple callers read or write the same association concurrently.
+	readMu      sync.Mutex
+	writeMu     sync.Mutex
+	readPacket  []byte
+	writePacket []byte
 }
 
 func (c *Client) Associate(ctx context.Context) (*Association, error) {
@@ -127,17 +138,27 @@ func (a *Association) Close() error {
 }
 
 func (a *Association) WriteTo(payload []byte, target netip.AddrPort) (int, error) {
-	if len(payload) > 65507-10 {
+	if len(payload) > maxUDPDatagram-udpHeaderSize {
 		return 0, errors.New("SOCKS UDP payload too large")
 	}
-	address, err := encodeAddress(target)
-	if err != nil {
-		return 0, err
+	if !target.Addr().Is4() {
+		return 0, errors.New("only IPv4 SOCKS addresses are supported")
 	}
-	packet := make([]byte, 3+len(address)+len(payload))
-	copy(packet[3:], address)
-	copy(packet[3+len(address):], payload)
-	_, err = a.udp.Write(packet)
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	packetSize := udpHeaderSize + len(payload)
+	if cap(a.writePacket) < packetSize {
+		// Retain only the largest datagram this flow actually sends. Typical
+		// MTU-sized traffic does not need a maximum-sized buffer per flow.
+		a.writePacket = make([]byte, packetSize)
+	}
+	packet := a.writePacket[:packetSize]
+	packet[0], packet[1], packet[2], packet[3] = 0, 0, 0, 1
+	ip := target.Addr().As4()
+	copy(packet[4:8], ip[:])
+	binary.BigEndian.PutUint16(packet[8:10], target.Port())
+	copy(packet[udpHeaderSize:], payload)
+	_, err := a.udp.Write(packet)
 	if err != nil {
 		return 0, err
 	}
@@ -145,19 +166,26 @@ func (a *Association) WriteTo(payload []byte, target netip.AddrPort) (int, error
 }
 
 func (a *Association) ReadFrom(buf []byte) (int, netip.AddrPort, error) {
-	packet := make([]byte, 65535)
+	a.readMu.Lock()
+	defer a.readMu.Unlock()
+	if a.readPacket == nil {
+		// Allocate once, with an extra byte to detect oversized datagrams
+		// rather than accidentally accepting a truncated packet.
+		a.readPacket = make([]byte, maxUDPDatagram+1)
+	}
+	packet := a.readPacket
 	n, err := a.udp.Read(packet)
 	if err != nil {
 		return 0, netip.AddrPort{}, err
 	}
-	if n < 10 || packet[0] != 0 || packet[1] != 0 || packet[2] != 0 || packet[3] != 1 {
+	if n > maxUDPDatagram || n < udpHeaderSize || packet[0] != 0 || packet[1] != 0 || packet[2] != 0 || packet[3] != 1 {
 		return 0, netip.AddrPort{}, errors.New("unsupported or malformed SOCKS UDP packet (IPv4 and FRAG=0 required)")
 	}
 	source := netip.AddrPortFrom(netip.AddrFrom4([4]byte(packet[4:8])), binary.BigEndian.Uint16(packet[8:10]))
-	if n-10 > len(buf) {
+	if n-udpHeaderSize > len(buf) {
 		return 0, netip.AddrPort{}, io.ErrShortBuffer
 	}
-	return copy(buf, packet[10:n]), source, nil
+	return copy(buf, packet[udpHeaderSize:n]), source, nil
 }
 
 func encodeAddress(a netip.AddrPort) ([]byte, error) {

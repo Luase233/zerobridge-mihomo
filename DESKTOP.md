@@ -4,16 +4,16 @@
 
 ## 简体中文
 
-v0.3.1 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framework 4.x（验证环境为 Windows 11）。桌面界面本身不新增网络监听端口，也不替换正在运行的网关进程。可选的[手机控制服务](MOBILE.md)会单独监听配置的 ZeroTier 私有地址。
+v0.3.2 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framework 4.x（验证环境为 Windows 11）。桌面界面本身不新增网络监听端口，也不替换正在运行的网关进程。可选的[手机控制服务](MOBILE.md)会单独监听配置的 ZeroTier 私有地址。
 
-- **运行面板：** 心跳状态、活动连接、收发包速率、当前代理进程累计拒绝/错误计数。
-- **图表：** 切换收发包速率和活动连接，最多显示打开界面后最近 10 分钟的数据。网关约每 5 秒写入统计，界面每 2 秒刷新。这里是包/秒，不是 Mbps；拒绝计数不等于丢包率。
+- **运行面板：** 网关健康状态、活动连接、手机上传/下载 Mbps、当前代理进程累计拒绝/错误计数。
+- **图表：** 切换 IPv4 上传/下载 Mbps、收发包速率和活动连接，最多显示打开界面后最近 10 分钟的数据。网关约每 5 秒写入统计，界面每 2 秒刷新。Mbps 来自收发 IPv4 包字节差值，包含包头，反映实际流量而非可用带宽测速；拒绝计数不等于丢包率。
 - **托盘：** 右下角通知区域的桥形图标；双击打开面板，右键启动、停止、打开日志或退出界面。Windows 可能将图标放在 `^` 隐藏图标区域，可自行拖到常显区域。
 - **关闭：** 关闭或最小化窗口会收起到托盘；“退出界面”仅退出界面，网关继续运行。
 - **语言：** 右上角切换简体中文 / English，偏好保存在当前用户的 `%LOCALAPPDATA%\ZeroBridgeMihomo\language.txt`。
 - **启停保护：** 先在手机关闭 Enable Default Route，再勾选确认框并通过 Windows UAC。操作调用现有 `scripts\Manage.ps1`；停止可能恢复原 NAT，启动仍受脚本预检约束。完成后检查状态，再决定是否开启客户端 Default Route。界面不会自动设置客户端。
 
-“心跳正常”只说明本地 supervisor 状态新鲜，不等于已通过端到端联网检测。状态或统计超过 20 秒未更新时，界面显示异常或停止显示速率。图表不持久化，进程更换会重置；没有新样本时不会伪造流量。
+“健康检查正常”表示本机 ZeroTier 接口、独立 guard 及 SOCKS/DNS 探测通过，不代表手机蜂窝网络或 ZeroTier 点对点链路质量。异常时显示恢复状态和原因，并保留转发进程。旧版网关仍显示“心跳正常”；没有字节字段时 Mbps 显示为空，可查看包速率。状态或统计超过 20 秒未更新时，界面显示异常或停止显示速率。图表不持久化，进程更换会重置；没有新样本时不会伪造流量。
 
 ### 构建、运行与登录自启
 
@@ -40,16 +40,16 @@ v0.3.1 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framewo
 
 ## English
 
-v0.3.1 includes a standalone Windows Forms dashboard using Windows' .NET Framework 4.x (validated on Windows 11). The desktop UI itself opens no network listener and does not replace the running gateway process. The optional [mobile service](MOBILE.md) separately listens on the configured private ZeroTier address.
+v0.3.2 includes a standalone Windows Forms dashboard using Windows' .NET Framework 4.x (validated on Windows 11). The desktop UI itself opens no network listener and does not replace the running gateway process. The optional [mobile service](MOBILE.md) separately listens on the configured private ZeroTier address.
 
-- **Dashboard:** supervisor heartbeat, active connections, packet rates, and the current proxy process's cumulative rejected/error counters.
-- **Charts:** switch between packet rates and active connections, retaining up to ten minutes collected while the UI runs. Gateway statistics arrive about every five seconds; the UI polls every two seconds. Rates are packets/s, not Mbps; rejected packets are not a packet-loss measurement.
+- **Dashboard:** gateway health, active connections, phone upload/download Mbps, and the current proxy process's cumulative rejected/error counters.
+- **Charts:** switch between IPv4 upload/download Mbps, packet rates and active connections, retaining up to ten minutes collected while the UI runs. Gateway statistics arrive about every five seconds; the UI polls every two seconds. Mbps uses differences in IPv4 byte counters including headers; it measures actual traffic rather than available bandwidth. Rejections are not a packet-loss measurement.
 - **Tray:** a bridge icon in the notification area. Double-click to open; right-click for Start, Stop, logs and Exit UI. Windows may place it under the `^` overflow menu; users can drag it into the visible area.
 - **Close:** closing or minimizing hides to the tray. Exit UI leaves the gateway running.
 - **Language:** switch Chinese / English at the upper right. The preference is stored in `%LOCALAPPDATA%\ZeroBridgeMihomo\language.txt`.
 - **Start/Stop:** first disable Enable Default Route on the phone, check the confirmation box, and approve Windows UAC. The UI calls existing `scripts\Manage.ps1`; stopping may restore original NAT and starting remains subject to its preflight checks. Check status before enabling the client's default route again. The UI does not configure the client.
 
-A healthy heartbeat describes fresh local supervisor state, not an end-to-end connectivity check. State or statistics older than twenty seconds are flagged or withheld from rate display. History is not persisted and resets when the proxy changes; missing samples are never represented as invented traffic.
+Passed health checks describe the Windows ZeroTier interface, independent guard and SOCKS/DNS probe, not the phone's cellular or peer-to-peer link quality. Degraded health shows a recovery state and reason while retaining forwarding processes. Older gateways still show heartbeat-only status; missing byte counters leave Mbps blank while packet rates remain available. State or statistics older than twenty seconds are flagged or withheld from rate display. History is not persisted and resets when the proxy changes; missing samples are never represented as invented traffic.
 
 ### Build, run and start at logon
 

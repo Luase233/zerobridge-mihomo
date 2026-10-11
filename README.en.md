@@ -6,9 +6,9 @@
 
 Windows amd64 · TCP / UDP / DNS · No TUN · Desktop dashboard and tray · MIT
 
-[v0.3.1 experimental prerelease](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.1) · [Desktop and tray](DESKTOP.md) · [Changelog](CHANGELOG.md) · [Autostart](AUTOSTART.md) · [Validation scope](VALIDATION.md)
+[v0.3.2 experimental prerelease](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.2) · [Desktop and tray](DESKTOP.md) · [Changelog](CHANGELOG.md) · [Autostart](AUTOSTART.md) · [Validation scope](VALIDATION.md)
 
-**v0.3.1:** mobile control shows existing node delays and can measure the current group. The default group follows Clash's mode and rules; command results also explain whether the group is on the current mode's selected outbound paths. If Windows reassigns the ZeroTier interface index, the gateway resolves the active adapter by the configured Windows ZeroTier address and client subnet. `interface_index` remains a hint; startup requires exactly one matching active ZeroTier adapter.
+**v0.3.2:** separate TCP and UDP idle limits prevent quiet TCP connections from being closed after two minutes; existing configurations default to a 30-minute TCP idle limit. Runtime interface checks retain capture and protection while the ZeroTier adapter is unavailable and update the return interface when it recovers. SOCKS/DNS checks report degraded and recovered states with hysteresis. Reusable UDP buffers reduce allocations; the desktop displays IPv4 upload/download Mbps, and the phone refreshes state after a network change or resume. Node delays and confirmed selections remain available.
 
 > This project provides local forwarding and protocol conversion only. **It does not provide or operate a VPN service, proxy nodes, subscriptions or an Internet egress service.** Users configure their own ZeroTier network and upstream proxy. See the [scope-of-use statement](DISCLAIMER.md).
 
@@ -32,13 +32,14 @@ flowchart TD
 ## Features
 
 - **iPhone control:** matching Home Screen web interface with QR pairing, node search, manual group selection and node-delay display/measurement; mode-aware group recommendation and desktop synchronization of confirmation and routing notes. See the [mobile guide](MOBILE.md).
-- **Desktop and tray:** bilingual dashboard, packet-rate / active-connection charts, logs, confirmed Start/Stop with UAC and a separate user-logon task. See the [desktop guide](DESKTOP.md).
+- **Desktop and tray:** bilingual dashboard, IPv4 upload/download Mbps, packet-rate / active-connection charts, logs, confirmed Start/Stop with UAC and a separate user-logon task. See the [desktop guide](DESKTOP.md).
 - **One configured client:** filter `ip and ip.SrcAddr == <source_ip>` at the forwarding layer. Windows-local connections, Mihomo outbound connections and ZeroTier's outer transport do not match it.
 - **TCP and UDP:** SOCKS CONNECT and UDP ASSOCIATE. The upstream and UDP relay are restricted to loopback. There is no direct-connect fallback after proxy failure.
 - **DNS:** ordinary forwarded TCP/UDP port 53 requests are redirected to the configured public resolver over SOCKS. Local delivery and direct same-subnet traffic are outside this capture scope.
 - **Protocol handling:** reuses tun2socks core's in-process gVisor stack for segmentation, retransmission, IPv4 fragmentation and return-packet checksums, without loading its TUN device.
 - **Failure protection:** an independent guard drops matching traffic if the proxy exits. If the guard exits, the proxy retains its capture handle and enters drop mode.
 - **Optional autostart:** a SYSTEM task with High priority, dependency waiting and child-process recovery.
+- **Runtime recovery:** identify the unique matching active ZeroTier adapter every 5 seconds. Every 30 seconds, a bounded TCP DNS query uses the existing SOCKS proxy and configured resolver; 3 consecutive failures mark degraded health and 2 successes restore readiness. This does not measure the phone-to-PC link. A single failed probe does not restart all flows or change the selected node.
 
 ## Before you start
 
@@ -87,7 +88,8 @@ Edit `gateway.json`. Example addresses and interface indices are placeholders, n
 | `dns` | Public IPv4 DNS on port 53; default `1.1.1.1:53` |
 | `mtu` | Default 1280; range 1280–1500 |
 | `max_flows` | Default 256; range 1–1024 |
-| `idle_timeout_seconds` | Default 120; range 15–600 |
+| `idle_timeout_seconds` | UDP idle limit; default 120, range 15–600 seconds |
+| `tcp_idle_timeout_seconds` | TCP idle limit; missing/0 defaults to 1800 seconds (30 minutes), explicit range 120–86400 seconds |
 | `windivert_dll` | Default `runtime/WinDivert.dll`, relative to the configuration file |
 
 **Review the NAT template separately.** `scripts/Nat.ps1` still restricts operations to `ZeroTierNAT` and the example prefix `10.147.20.0/24`. Before using another subnet, review and adjust `$expectedPrefix` there and the `Expected` fields in `scripts/Inspect.ps1`. Changing JSON alone does not authorize management of another NAT; mismatches are rejected.
@@ -102,6 +104,19 @@ Keep the phone's Default Route OFF:
 ```
 
 These check interfaces, forwarding, NAT, driver signature and hashes, then test TCP DNS, UDP DNS and HTTPS egress over the existing SOCKS endpoint. Probes contact the configured resolver and api.ipify.org; they do not load the driver or modify networking.
+
+## Update an installed boot gateway
+
+This applies to an installation with the existing `ZeroTierGateway` SYSTEM task described in the autostart guide. Build the new version, disable the phone's Default Route, and run from a separate source checkout as administrator:
+
+```powershell
+go build -trimpath -o bin/zt-gateway.exe ./cmd/zt-gateway
+& .\scripts\Update-Gateway.ps1 -GatewayRoot C:\ZeroTierGateway -PhoneDefaultRouteIsOff
+# To update phone and desktop controls too, build both first, then run:
+& .\scripts\Update-Control.ps1 -GatewayRoot C:\ZeroTierGateway
+```
+
+The gateway updater runs a read-only preflight, backs up the old binary and supervisor, validates hashes and process ownership, then restarts the verified task. Failures restore the old files. Configuration, task settings and NAT state are preserved. Older configurations without a TCP idle field automatically use 1800 seconds without rewriting the file. Enable the phone route only after fresh versioned readiness and health checks pass. Physical outages, node changes and server-initiated closures can still require applications to establish new connections.
 
 ## Start, verify and stop
 

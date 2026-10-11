@@ -81,7 +81,7 @@ namespace ZeroBridge.Desktop
             chartHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); chartHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
             chartTitle = Style.Label("", 11, Style.Ink, FontStyle.Bold);
             chartMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 185, Anchor = AnchorStyles.Right, AccessibleName = "Chart metric" };
-            chartMode.SelectedIndexChanged += delegate { chart.Connections = chartMode.SelectedIndex == 1; UpdateLegend(); chart.Invalidate(); };
+            chartMode.SelectedIndexChanged += delegate { chart.Connections = chartMode.SelectedIndex == 1; chart.Bandwidth = chartMode.SelectedIndex == 0; UpdateLegend(); chart.Invalidate(); };
             chartHeader.Controls.Add(chartTitle, 0, 0); chartHeader.Controls.Add(chartMode, 1, 0); main.Controls.Add(chartHeader, 0, 4);
             var chartPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(8), Margin = new Padding(0) };
             chart = new TrafficChart { Dock = DockStyle.Fill, History = history };
@@ -115,21 +115,21 @@ namespace ZeroBridge.Desktop
             headline.Text = T("网关概览", "Gateway overview"); language.Text = english ? "简体中文" : "English";
             subtitle.Text = T("ZeroTier → 本机转发 → Mihomo · 实时运行状态", "ZeroTier → local forwarding → Mihomo · live status");
             navTitle.Text = T("●  运行面板", "●  Dashboard"); navDetail.Text = T("本地转发工具\n不提供 VPN 服务\n关闭窗口将收起到托盘", "Local forwarding tool\nNo VPN service provided\nClose window to hide to tray");
-            captions[0].Text = T("活动连接", "Active connections"); captions[1].Text = T("接收 · 包/秒", "Received · packets/s"); captions[2].Text = T("发送 · 包/秒", "Sent · packets/s"); captions[3].Text = T("拒绝 / 错误 · 累计", "Rejected / errors · total");
+            captions[0].Text = T("活动连接", "Active connections"); captions[1].Text = T("手机上传 · Mbps", "Phone upload · Mbps"); captions[2].Text = T("手机下载 · Mbps", "Phone download · Mbps"); captions[3].Text = T("拒绝 / 错误 · 累计", "Rejected / errors · total");
             chartTitle.Text = T("最近 10 分钟", "Last 10 minutes");
-            int selected = Math.Max(0, chartMode.SelectedIndex); chartMode.Items.Clear(); chartMode.Items.Add(T("收发包速率", "Packet rate")); chartMode.Items.Add(T("活动连接", "Active connections")); chartMode.SelectedIndex = selected;
+            int selected = Math.Max(0, chartMode.SelectedIndex); chartMode.Items.Clear(); chartMode.Items.Add(T("上传 / 下载 Mbps", "Upload / download Mbps")); chartMode.Items.Add(T("活动连接", "Active connections")); chartMode.Items.Add(T("收发包速率", "Packet rate")); chartMode.SelectedIndex = selected;
             chart.English = english; UpdateLegend(); chart.Invalidate();
             start.Text = trayStart.Text = T("启动网关", "Start gateway"); stop.Text = trayStop.Text = T("停止网关", "Stop gateway"); logs.Text = trayLogs.Text = T("打开日志", "Open logs");
             phone.Text = T("手机控制", "Mobile control");
             trayShow.Text = T("打开运行面板", "Open dashboard"); trayExit.Text = T("退出界面（网关继续运行）", "Exit UI (keep gateway running)");
             footnote.Text = T("本项目仅提供本地转发与协议转换，不提供 VPN、节点或订阅服务。", "Local forwarding and protocol conversion only. No VPN, proxy nodes or subscriptions provided.");
         }
-        private void UpdateLegend() { legend.Text = chart.Connections ? T("  绿色：活动连接数", "  Green: active connections") : T("  绿色：接收    蓝色：发送    · 包速率，非带宽；拒绝计数不等于丢包率", "  Green: received    Blue: sent    · packets/s, not bandwidth; rejected is not packet loss"); }
+        private void UpdateLegend() { legend.Text = chart.Connections ? T("  绿色：活动连接数", "  Green: active connections") : chart.Bandwidth ? T("  绿色：手机上传    蓝色：手机下载    · IPv4 包字节速率，含包头，并非可用带宽测速", "  Green: phone upload    Blue: phone download    · IPv4 bytes including headers, not a capacity test") : T("  绿色：接收    蓝色：发送    · 包速率，非带宽；拒绝计数不等于丢包率", "  Green: received    Blue: sent    · packets/s, not bandwidth; rejected is not packet loss"); }
         private void RefreshState()
         {
             current = reader.Read(DateTime.UtcNow); history.Update(current);
             string state = current.Ready ? "ready" : current.State == "stopped" ? "stopped" : "warning";
-            string label = current.Ready ? T("运行中 · 心跳正常", "Running · heartbeat healthy") : current.State == "stopped" ? T("已停止", "Stopped") : T("待检查 · 状态未就绪或已过期", "Attention · not ready or stale");
+            string label = current.Ready ? current.HasHealth ? T("运行中 · 健康检查正常", "Running · health checks passed") : T("运行中 · 心跳正常", "Running · heartbeat healthy") : current.State == "degraded" ? T("连接恢复中 · 请查看下方原因", "Connection recovering · see details below") : current.State == "stopped" ? T("已停止", "Stopped") : T("待检查 · 状态未就绪或已过期", "Attention · not ready or stale");
             if (busy) label = T("正在执行管理操作…", "Management operation in progress…");
             status.Text = "●  " + label + (readOnly ? T(" · 只读", " · read only") : ""); status.ForeColor = state == "ready" ? Style.Teal : state == "warning" ? Style.Warning : Style.Muted;
             if (iconState != state)
@@ -139,8 +139,8 @@ namespace ZeroBridge.Desktop
             tray.Text = "ZeroBridge Mihomo · " + (state == "ready" ? "Running" : state == "stopped" ? "Stopped" : "Attention");
             bool sample = current.Ready && current.HasStats;
             values[0].Text = sample ? current.Active.ToString("0") : "—";
-            values[1].Text = sample && history.Points.Count > 1 ? history.Current.InRate.ToString("0.#") : "—";
-            values[2].Text = sample && history.Points.Count > 1 ? history.Current.OutRate.ToString("0.#") : "—";
+            values[1].Text = sample && current.HasBytes && history.Points.Count > 1 ? history.Current.InMbps.ToString("0.##") : "—";
+            values[2].Text = sample && current.HasBytes && history.Points.Count > 1 ? history.Current.OutMbps.ToString("0.##") : "—";
             values[3].Text = sample ? current.Rejected.ToString("0") + " / " + current.Errors.ToString("0") : "—";
             string sampleText = sample ? current.SampleTime.ToLocalTime().ToString("HH:mm:ss") : T("无新鲜样本", "No fresh sample");
             details.Text = T("客户端 ", "Client ") + current.Source + "    →    SOCKS " + current.Upstream + "\n" + T("最近采样 ", "Last sample ") + sampleText + "   ·   " + current.State + (current.Error.Length > 0 ? " · " + current.Error : "") + "\n" + reader.Root;

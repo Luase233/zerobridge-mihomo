@@ -26,7 +26,7 @@ try {
     if (-not $rejected -or (Hash $target) -ne $expected) { throw 'Changed-source rejection failed.' }
 
     # Heartbeat checks use UTF-8 fixtures and a process stub, never installed files.
-    $expectedVersion = '0.3.1'; $files = @([pscustomobject]@{Target='fixture-mobile.exe'})
+    $expectedVersion = '0.3.2'; $files = @([pscustomobject]@{Target='fixture-mobile.exe'})
     $statePath = Join-Path $fixture 'status.json'
     # Keep this script ASCII so Windows PowerShell 5.1 can read its source safely.
     $unicodeGroup = -join @([char]0x901f, [char]0x4e91, [char]0x68af)
@@ -38,15 +38,15 @@ try {
         [IO.File]::WriteAllText($statePath, $json, (New-Object Text.UTF8Encoding($false)))
     }
     $since = [DateTime]::UtcNow
-    Set-State '0.3.1' $true $since
+    Set-State '0.3.2' $true $since
     if (-not (Mobile-Ready $since)) { throw 'Fresh UTF-8 heartbeat rejected.' }
-    Set-State '0.3.1' $true $since -Nanoseconds
+    Set-State '0.3.2' $true $since -Nanoseconds
     if (-not (Mobile-Ready $since)) { throw 'Nanosecond UTF-8 heartbeat rejected.' }
     Set-State '0.3.0' $true $since
     if (Mobile-Ready $since) { throw 'Old version accepted.' }
-    Set-State '0.3.1' $false $since
+    Set-State '0.3.2' $false $since
     if (Mobile-Ready $since) { throw 'Offline heartbeat accepted.' }
-    Set-State '0.3.1' $true $since.AddSeconds(-30)
+    Set-State '0.3.2' $true $since.AddSeconds(-30)
     if (Mobile-Ready $since) { throw 'Stale heartbeat accepted.' }
 
     # A reused PID must never reach Stop-Process. All process functions are mocks.
