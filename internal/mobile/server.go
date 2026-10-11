@@ -64,36 +64,49 @@ func (c Config) Validate() error {
 }
 
 type Proxy struct {
-	Type string   `json:"type"`
-	Now  string   `json:"now"`
-	All  []string `json:"all"`
+	Type    string         `json:"type"`
+	Now     string         `json:"now"`
+	All     []string       `json:"all"`
+	History []DelayHistory `json:"history,omitempty"`
 }
 type Group struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	Now        string   `json:"now"`
-	All        []string `json:"all,omitempty"`
-	Selectable bool     `json:"selectable"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Now         string   `json:"now"`
+	All         []string `json:"all,omitempty"`
+	Selectable  bool     `json:"selectable"`
+	RoutingUsed bool     `json:"routing_used"`
+	RoutingNote string   `json:"routing_note"`
 }
 type Event struct {
-	ID      string `json:"id"`
-	Time    string `json:"time"`
-	Client  string `json:"client"`
-	Group   string `json:"group"`
-	Target  string `json:"target"`
-	Before  string `json:"before"`
-	Current string `json:"current"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	ID          string `json:"id"`
+	Time        string `json:"time"`
+	Client      string `json:"client"`
+	Group       string `json:"group"`
+	Target      string `json:"target"`
+	Before      string `json:"before"`
+	Current     string `json:"current"`
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	Mode        string `json:"mode,omitempty"`
+	RoutingUsed *bool  `json:"routing_used,omitempty"`
+	RoutingNote string `json:"routing_note,omitempty"`
 }
 type State struct {
-	Updated string  `json:"updated"`
-	Online  bool    `json:"online"`
-	Mode    string  `json:"mode"`
-	Error   string  `json:"error,omitempty"`
-	Groups  []Group `json:"groups"`
-	Events  []Event `json:"events"`
+	Updated        string             `json:"updated"`
+	Online         bool               `json:"online"`
+	Mode           string             `json:"mode"`
+	Error          string             `json:"error,omitempty"`
+	Groups         []Group            `json:"groups"`
+	Events         []Event            `json:"events"`
+	PreferredGroup string             `json:"preferred_group"`
+	RoutingKnown   bool               `json:"routing_known"`
+	Latencies      map[string]Latency `json:"latencies,omitempty"`
+	Version        string             `json:"version"`
 }
+
+const Version = "0.3.1"
+
 type Controller struct{ Client *http.Client }
 
 func (c Controller) request(ctx context.Context, method, path string, body any, out any) error {
@@ -140,8 +153,16 @@ func (c Controller) Read(ctx context.Context) (State, error) {
 	if err := c.request(ctx, "GET", "/proxies", nil, &proxies); err != nil {
 		return State{}, err
 	}
-	s := State{Online: true, Mode: config.Mode, Groups: []Group{}}
+	s := State{Online: true, Mode: strings.ToLower(config.Mode), Groups: []Group{}, Version: Version, Latencies: map[string]Latency{}}
 	for name, p := range proxies.Proxies {
+		if len(p.History) > 0 {
+			h := p.History[len(p.History)-1]
+			status := "ok"
+			if h.Delay == 0 {
+				status = "timeout"
+			}
+			s.Latencies[name] = Latency{DelayMS: h.Delay, Status: status, TestedAt: h.Time.UTC().Format(time.RFC3339Nano)}
+		}
 		if len(p.All) > 0 {
 			s.Groups = append(s.Groups, Group{Name: name, Type: p.Type, Now: p.Now, All: p.All, Selectable: p.Type == "Selector"})
 		}
@@ -155,24 +176,40 @@ func (c Controller) Read(ctx context.Context) (State, error) {
 		}
 		return s.Groups[i].Name < s.Groups[j].Name
 	})
+	var rules []Rule
+	routingKnown := true
+	if s.Mode == "rule" {
+		var result struct {
+			Rules []Rule `json:"rules"`
+		}
+		if err := c.request(ctx, "GET", "/rules", nil, &result); err != nil {
+			routingKnown = false
+		} else {
+			rules = result.Rules
+		}
+	}
+	applyRouting(&s, proxies.Proxies, rules, routingKnown)
 	return s, nil
 }
 
 type Server struct {
-	config     Config
-	controller Controller
-	handler    http.Handler
-	mu         sync.Mutex
-	state      State
-	events     []Event
-	limiter    *rate.Limiter
+	config       Config
+	controller   Controller
+	handler      http.Handler
+	mu           sync.Mutex
+	state        State
+	events       []Event
+	limiter      *rate.Limiter
+	delayMu      sync.Mutex
+	delayStarted time.Time
+	latencies    map[string]Latency
 }
 
 func New(c Config, controller Controller) (*Server, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	s := &Server{config: c, controller: controller, events: []Event{}, limiter: rate.NewLimiter(5, 20)}
+	s := &Server{config: c, controller: controller, events: []Event{}, limiter: rate.NewLimiter(5, 20), latencies: map[string]Latency{}}
 	if b, err := os.ReadFile(c.StateFile); err == nil && len(b) < 131072 {
 		var old State
 		if json.Unmarshal(b, &old) == nil {
@@ -192,6 +229,7 @@ func New(c Config, controller Controller) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/state", s.getState)
 	mux.HandleFunc("POST /api/select", s.selectProxy)
+	mux.HandleFunc("POST /api/delay", s.measureDelay)
 	files := http.FileServer(http.FS(static))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" && r.Method != "HEAD" {
@@ -257,6 +295,10 @@ func reply(w http.ResponseWriter, status int, value any) {
 }
 func (s *Server) refresh(ctx context.Context) {
 	state, err := s.controller.Read(ctx)
+	// A caller that expired while waiting for a selection must not publish a false outage.
+	if ctx.Err() != nil {
+		return
+	}
 	state.Updated = time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
 		state.Online = false
@@ -264,6 +306,14 @@ func (s *Server) refresh(ctx context.Context) {
 		state.Groups = []Group{}
 	}
 	state.Events = append([]Event{}, s.events...)
+	for name, measured := range s.latencies {
+		if previous, ok := state.Latencies[name]; !ok || newerLatency(measured, previous) {
+			if state.Latencies == nil {
+				state.Latencies = map[string]Latency{}
+			}
+			state.Latencies[name] = measured
+		}
+	}
 	s.state = state
 }
 func (s *Server) persist() error {
@@ -271,6 +321,7 @@ func (s *Server) persist() error {
 	state.Events = append([]Event{}, s.events...)
 	state.Updated = time.Now().UTC().Format(time.RFC3339Nano)
 	state.Groups = append([]Group{}, state.Groups...)
+	state.Latencies = nil // Desktop needs selections and audit, not hundreds of node histories.
 	for i := range state.Groups {
 		state.Groups[i].All = nil
 	}
@@ -297,7 +348,13 @@ func (s *Server) persist() error {
 func (s *Server) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.refresh(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return s.persist()
 }
 func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
@@ -368,31 +425,44 @@ func (s *Server) selectProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client, _, _ := net.SplitHostPort(r.RemoteAddr)
-	event := Event{ID: input.ID, Time: time.Now().UTC().Format(time.RFC3339Nano), Client: client, Group: input.Group, Target: input.Name, Before: group.Now, Status: "pending", Message: "Applying selection"}
+	used := group.RoutingUsed
+	event := Event{ID: input.ID, Time: time.Now().UTC().Format(time.RFC3339Nano), Client: client, Group: input.Group, Target: input.Name, Before: group.Now, Status: "pending", Message: "Applying selection", Mode: s.state.Mode, RoutingUsed: &used, RoutingNote: group.RoutingNote}
+	previousEvents := append([]Event{}, s.events...)
 	s.events = append(s.events, event)
 	if len(s.events) > 20 {
 		s.events = s.events[len(s.events)-20:]
 	}
 	if err := s.persist(); err != nil {
-		s.events = s.events[:len(s.events)-1]
+		s.events = previousEvents
 		reply(w, 503, map[string]string{"error": "Audit state unavailable; command not executed"})
 		return
 	}
-	err := s.controller.request(ctx, "PUT", "/proxies/"+url.PathEscape(input.Group), map[string]string{"name": input.Name}, nil)
+	_ = s.controller.request(ctx, "PUT", "/proxies/"+url.PathEscape(input.Group), map[string]string{"name": input.Name}, nil)
 	event.Status = "unconfirmed"
 	event.Message = "Selection not confirmed; refresh before retrying"
-	if err == nil {
-		var actual Proxy
-		if e := s.controller.request(ctx, "GET", "/proxies/"+url.PathEscape(input.Group), nil, &actual); e == nil {
-			event.Current = actual.Now
-			if actual.Now == input.Name {
-				event.Status = "success"
-				event.Message = "Clash confirmed the selected node"
-			}
+	// A failed PUT response can still have applied. Always read back, then check
+	// the final snapshot too, so a concurrent desktop change is not called success.
+	var actual Proxy
+	readback := s.controller.request(ctx, "GET", "/proxies/"+url.PathEscape(input.Group), nil, &actual)
+	s.refresh(ctx)
+	if readback == nil {
+		event.Current = actual.Now
+	}
+	for _, current := range s.state.Groups {
+		if current.Name != input.Group {
+			continue
 		}
+		event.Current = current.Now
+		used = current.RoutingUsed
+		event.Mode, event.RoutingNote = s.state.Mode, current.RoutingNote
+		if readback == nil && actual.Now == input.Name && current.Now == input.Name && s.state.Online && ctx.Err() == nil {
+			event.Status = "success"
+			event.Message = "Clash confirmed this group's selection; routing depends on the current mode and new connections"
+		}
+		break
 	}
 	s.events[len(s.events)-1] = event
-	s.refresh(ctx)
+	s.state.Events = append([]Event{}, s.events...)
 	if e := s.persist(); e != nil {
 		reply(w, 503, map[string]string{"error": "Command sent, but desktop synchronization failed; check current selection"})
 		return

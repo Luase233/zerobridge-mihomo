@@ -27,6 +27,19 @@ namespace ZeroBridge.Desktop
         private static bool Fresh(Dictionary<string, object> state) { double age = (DateTime.UtcNow - Json.Time(Json.Text(state, "updated"))).TotalSeconds; return age >= -5 && age < 20; }
         private static string Outcome(string outcome, bool english)
         { return outcome == "success" ? (english ? "Confirmed" : "Clash 已确认") : outcome == "pending" ? (english ? "Applying" : "执行中") : (english ? "Unconfirmed" : "结果待确认"); }
+        private static string Outcome(Dictionary<string, object> item, bool english)
+        {
+            string result = Outcome(Json.Text(item, "status"), english);
+            string note = Json.Text(item, "routing_note");
+            string used = Json.Text(item, "routing_used"), mode = Json.Text(item, "mode");
+            if (english && string.Equals(used, "False", StringComparison.OrdinalIgnoreCase))
+                note = mode == "direct" ? "Direct mode ignores proxy-group selections" : mode == "rule" && Json.Text(item, "group") == "GLOBAL" ? "Rule mode does not reference GLOBAL; this change usually leaves routing unchanged" : "Group is outside the current mode's selected paths; saved selection may leave routing unchanged";
+            else if (english && note.Length > 0 && string.Equals(used, "True", StringComparison.OrdinalIgnoreCase))
+                note = mode == "rule" ? "Rules can use this group; routing depends on matched rules and new connections" : "Group is on current selected paths; existing connections may retain their prior node";
+            else if (note.Length == 0 && string.Equals(used, "False", StringComparison.OrdinalIgnoreCase))
+                note = english ? "Group is outside the current mode's selected paths" : "此组不在当前模式选中的出站路径中";
+            return note.Length == 0 ? result : result + " · " + note;
+        }
         public static string Summary(string root, bool english)
         {
             try
@@ -35,7 +48,7 @@ namespace ZeroBridge.Desktop
                 bool online = string.Equals(Json.Text(state, "online"), "True", StringComparison.OrdinalIgnoreCase);
                 string prefix = !Fresh(state) ? (english ? "Mobile control · offline" : "手机控制 · 状态已过期") : !online ? (english ? "Mobile control · Clash unavailable" : "手机控制 · Clash 暂不可用") : (english ? "Mobile control · online" : "手机控制 · 在线");
                 if (last == null) return prefix + (english ? " · waiting for a command" : " · 等待手机指令");
-                return prefix + "\n" + Json.Time(Json.Text(last, "time")).ToLocalTime().ToString("HH:mm:ss") + "  " + Json.Text(last, "group") + " → " + Json.Text(last, "target") + " · " + Outcome(Json.Text(last, "status"), english);
+                return prefix + "\n" + Json.Time(Json.Text(last, "time")).ToLocalTime().ToString("HH:mm:ss") + "  " + Json.Text(last, "group") + " → " + Json.Text(last, "target") + " · " + Outcome(last, english);
             }
             catch { return english ? "Mobile control · not installed or unavailable" : "手机控制 · 未安装或暂不可用"; }
         }
@@ -45,7 +58,7 @@ namespace ZeroBridge.Desktop
             Text = "ZeroBridge · " + T("手机控制", "Mobile control"); Font = new Font("Microsoft YaHei UI", 9); BackColor = Style.Canvas; Size = new Size(900, 710); MinimumSize = new Size(780, 620); StartPosition = FormStartPosition.CenterScreen;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 5 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            foreach (float size in new float[] { 44, 220, 66, 38 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, size)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            foreach (float size in new float[] { 44, 220, 82, 38 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, size)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.Controls.Add(Style.Label(T("手机选择 · 电脑同步", "Choose on phone · see it on desktop"), 19, Style.Ink, FontStyle.Bold), 0, 0);
             var pairing = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.White, ColumnCount = 2, Padding = new Padding(12) }; pairing.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 192)); pairing.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             qr = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom };
@@ -63,9 +76,9 @@ namespace ZeroBridge.Desktop
             var reveal = new CheckBox { Text = T("显示密钥", "Show key"), AutoSize = true, Margin = new Padding(4, 11, 0, 0) }; reveal.CheckedChanged += delegate { tokenBox.UseSystemPasswordChar = !reveal.Checked; }; buttons.Controls.Add(copy); buttons.Controls.Add(reveal); info.Controls.Add(buttons, 0, 3);
             pairing.Controls.Add(info, 1, 0); layout.Controls.Add(pairing, 0, 1);
             status = Style.Label("", 10, Style.Teal, FontStyle.Regular); layout.Controls.Add(status, 0, 2);
-            layout.Controls.Add(Style.Label(T("最近 20 条指令 · 每 2 秒同步 · 成功表示 Clash 当前选择已回读确认", "Last 20 commands · refreshes every 2s · confirmed by reading Clash selection"), 9, Style.Muted, FontStyle.Regular), 0, 3);
-            events = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = false, BorderStyle = BorderStyle.None };
-            events.Columns.Add(T("时间", "Time"), 100); events.Columns.Add(T("来源", "Source"), 125); events.Columns.Add(T("代理组 → 目标", "Group → target"), 290); events.Columns.Add(T("执行结果", "Result"), 160); layout.Controls.Add(events, 0, 4); Controls.Add(layout);
+            layout.Controls.Add(Style.Label(T("最近 20 条指令 · 每 2 秒同步 · 确认选中节点，并注明当前模式的出站影响", "Last 20 commands · every 2s · selection confirmation and mode-related routing notes"), 9, Style.Muted, FontStyle.Regular), 0, 3);
+            events = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = false, BorderStyle = BorderStyle.None, ShowItemToolTips = true };
+            events.Columns.Add(T("时间", "Time"), 90); events.Columns.Add(T("来源", "Source"), 110); events.Columns.Add(T("代理组 → 目标", "Group → target"), 270); events.Columns.Add(T("执行结果与出站说明", "Result and routing note"), 300); layout.Controls.Add(events, 0, 4); Controls.Add(layout);
             AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi; ResumeLayout(true);
             timer.Tick += delegate { RefreshCommands(); }; timer.Start(); RefreshCommands();
         }
@@ -81,7 +94,10 @@ namespace ZeroBridge.Desktop
                 if (state.TryGetValue("events", out items) && items is IEnumerable) foreach (var value in (IEnumerable)items)
                 {
                     var item = value as Dictionary<string, object>; if (item == null) continue;
-                    rows.Add(new ListViewItem(new string[] { Json.Time(Json.Text(item, "time")).ToLocalTime().ToString("HH:mm:ss"), Json.Text(item, "client"), Json.Text(item, "group") + " → " + Json.Text(item, "target"), Outcome(Json.Text(item, "status"), english) }));
+                    var row = new ListViewItem(new string[] { Json.Time(Json.Text(item, "time")).ToLocalTime().ToString("HH:mm:ss"), Json.Text(item, "client"), Json.Text(item, "group") + " → " + Json.Text(item, "target"), Outcome(item, english) });
+                    string eventMode = Json.Text(item, "mode");
+                    row.ToolTipText = (eventMode.Length > 0 ? T("提交时模式：", "Mode at command: ") + eventMode + "\n" : "") + Outcome(item, english);
+                    rows.Add(row);
                 }
                 rows.Reverse(); events.BeginUpdate(); events.Items.Clear(); events.Items.AddRange(rows.ToArray()); events.EndUpdate();
             }

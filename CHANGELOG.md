@@ -2,7 +2,19 @@
 
 [简体中文 README](README.md) · [English README](README.en.md)
 
-## Unreleased / 未发布
+## v0.3.1 — 2026-10-11
+
+- 手机节点列表显示已有延迟，并增加当前组测速与延迟排序；单节点探测使用固定地址、3 秒超时和受限并发，不清除自动组的固定选择。
+- 按 Clash 当前模式与实际规则推荐手动代理组；标明不影响当前模式的组，避免规则模式下仅切换 `GLOBAL` 后误以为出口已变化。
+- 切换结果核对回读与最终刷新状态；手机和电脑同步显示提交时模式、选择确认与出站说明。已有连接可能保持原节点，选择确认不等于请求出口已验证。
+- Display existing node delays and add bounded current-group tests and latency sorting. Individual probes use a fixed address and 3-second timeout without clearing automatic-group fixed choices.
+- Recommend a manual group using Clash's current mode and rules; identify groups outside its selected paths so a rule-mode `GLOBAL` change is not mistaken for an effective exit change.
+- Reconcile selection readback with final refreshed state. Phone and desktop share command mode, selection confirmation and routing notes. Existing connections may retain their prior node; selection confirmation does not verify a request's exit.
+
+- 增加控制程序更新脚本：备份、哈希核验、新版本心跳检查与失败回退，保留配对和配置；显式按 UTF-8 读取中文状态文件，兼容 Windows PowerShell 5.1。
+- Add a control updater with backups, hash checks, versioned heartbeat verification and rollback, preserving pairing and configuration. Read UTF-8 status explicitly so Chinese group names work in Windows PowerShell 5.1.
+
+用户已确认本版本 iPhone 能显示节点延迟，切换选择同步到 Clash。User confirmed delay display and synchronized selections from a physical iPhone.
 
 - 修复 Windows 重启后 ZeroTier 网卡编号变化导致网关预检失败：启动时按配置的 ZeroTier 地址与客户端子网重新识别活动网卡；不存在或匹配多个时拒绝启动。
 - 手机控制安装器也按 ZeroTier 地址识别网卡，避免重新安装时依赖过期编号。

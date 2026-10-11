@@ -42,7 +42,7 @@ func main() {
 		if e != nil {
 			log.Fatal(e)
 		}
-		fmt.Printf("Controller available; mode=%s; groups=%d\n", state.Mode, len(state.Groups))
+		fmt.Printf("Controller available; version=%s; mode=%s; groups=%d; preferred=%s\n", mobile.Version, state.Mode, len(state.Groups), state.PreferredGroup)
 		return
 	}
 	server, err := mobile.New(cfg, controller)
@@ -71,7 +71,7 @@ func main() {
 			time.Sleep(5 * time.Second)
 		}
 	}()
-	log.Printf("ZeroBridge Mobile v0.3.0 listening on %s", cfg.Listen)
-	srv := &http.Server{Handler: server, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	log.Printf("ZeroBridge Mobile v%s listening on %s", mobile.Version, cfg.Listen)
+	srv := &http.Server{Handler: server, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 100 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	log.Fatal(srv.Serve(listener))
 }

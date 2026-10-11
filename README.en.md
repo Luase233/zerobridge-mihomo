@@ -6,9 +6,9 @@
 
 Windows amd64 · TCP / UDP / DNS · No TUN · Desktop dashboard and tray · MIT
 
-[v0.3.0 experimental prerelease](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.0) · [Desktop and tray](DESKTOP.md) · [Changelog](CHANGELOG.md) · [Autostart](AUTOSTART.md) · [Validation scope](VALIDATION.md)
+[v0.3.1 experimental prerelease](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.1) · [Desktop and tray](DESKTOP.md) · [Changelog](CHANGELOG.md) · [Autostart](AUTOSTART.md) · [Validation scope](VALIDATION.md)
 
-**Reboot fix on `main`:** if Windows reassigns the ZeroTier interface index, the gateway resolves the active adapter from the configured Windows ZeroTier address and client subnet. `interface_index` remains a hint in `gateway.json`; startup requires exactly one matching active ZeroTier adapter.
+**v0.3.1:** mobile control shows existing node delays and can measure the current group. The default group follows Clash's mode and rules; command results also explain whether the group is on the current mode's selected outbound paths. If Windows reassigns the ZeroTier interface index, the gateway resolves the active adapter by the configured Windows ZeroTier address and client subnet. `interface_index` remains a hint; startup requires exactly one matching active ZeroTier adapter.
 
 > This project provides local forwarding and protocol conversion only. **It does not provide or operate a VPN service, proxy nodes, subscriptions or an Internet egress service.** Users configure their own ZeroTier network and upstream proxy. See the [scope-of-use statement](DISCLAIMER.md).
 
@@ -31,7 +31,7 @@ flowchart TD
 
 ## Features
 
-- **iPhone control:** matching Home Screen web interface with QR pairing, node search and manual group selection; desktop command/result synchronization. See the [mobile guide](MOBILE.md).
+- **iPhone control:** matching Home Screen web interface with QR pairing, node search, manual group selection and node-delay display/measurement; mode-aware group recommendation and desktop synchronization of confirmation and routing notes. See the [mobile guide](MOBILE.md).
 - **Desktop and tray:** bilingual dashboard, packet-rate / active-connection charts, logs, confirmed Start/Stop with UAC and a separate user-logon task. See the [desktop guide](DESKTOP.md).
 - **One configured client:** filter `ip and ip.SrcAddr == <source_ip>` at the forwarding layer. Windows-local connections, Mihomo outbound connections and ZeroTier's outer transport do not match it.
 - **TCP and UDP:** SOCKS CONNECT and UDP ASSOCIATE. The upstream and UDP relay are restricted to loopback. There is no direct-connect fallback after proxy failure.

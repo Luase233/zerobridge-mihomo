@@ -6,9 +6,9 @@
 
 Windows amd64 · TCP / UDP / DNS · 无 TUN · 桌面面板与托盘 · MIT
 
-[v0.3.0 实验性预发布](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.0) · [界面与托盘](DESKTOP.md) · [更新日志](CHANGELOG.md) · [开机自启](AUTOSTART.zh-CN.md) · [验证范围（English）](VALIDATION.md)
+[v0.3.1 实验性预发布](https://github.com/Luase233/zerobridge-mihomo/releases/tag/v0.3.1) · [界面与托盘](DESKTOP.md) · [更新日志](CHANGELOG.md) · [开机自启](AUTOSTART.zh-CN.md) · [验证范围（English）](VALIDATION.md)
 
-**重启修复已进入 `main`：** Windows 重新分配 ZeroTier 网卡编号时，网关按配置的 Windows ZeroTier 地址及客户端子网识别当前接口。`gateway.json` 的 `interface_index` 仍保留为提示值；必须匹配唯一的活动 ZeroTier 网卡才会启动。
+**v0.3.1：** 手机控制显示各节点的已有延迟，并可测量当前组；默认代理组按 Clash 模式与规则选择，切换结果同时说明该组是否位于当前模式选中的出站路径中。Windows 重新分配 ZeroTier 网卡编号时，网关按配置的 Windows ZeroTier 地址及客户端子网识别当前接口；`interface_index` 仍保留为提示值，必须匹配唯一的活动 ZeroTier 网卡才会启动。
 
 > 本项目仅提供本地转发与协议转换功能，**不提供或运营 VPN 服务、代理节点、订阅或网络出口服务**。ZeroTier 网络和上游代理均由使用者自行配置。完整说明见[项目使用声明](DISCLAIMER.md)。
 
@@ -31,7 +31,7 @@ flowchart TD
 
 ## 功能
 
-- **iPhone 手机控制：** 同款网页可添加到主屏幕，扫码配对、搜索并切换 Clash 手动代理组节点；电脑端同步命令与确认结果。见[手机控制说明](MOBILE.md)。
+- **iPhone 手机控制：** 同款网页可添加到主屏幕，扫码配对、搜索并切换 Clash 手动代理组节点、显示与测量节点延迟；按当前模式推荐代理组，电脑端同步确认结果与出站说明。见[手机控制说明](MOBILE.md)。
 - **交互界面与托盘：** 中英文运行面板、收发包速率 / 活动连接图表、日志入口、带确认和 UAC 的启动/停止，以及独立的用户登录自启。见[桌面使用说明](DESKTOP.md)。
 - **单客户端范围：** filter 为 `ip and ip.SrcAddr == <source_ip>`，只作用于转发层。Windows 本机、Mihomo 出站和 ZeroTier 外层连接不匹配这一过滤器。
 - **TCP 与 UDP：** TCP 使用 SOCKS CONNECT；UDP 使用 UDP ASSOCIATE。上游和 UDP relay 限于本机回环地址，没有代理失败后直连的回退。

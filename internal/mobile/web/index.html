@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#131d2e"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="ZeroBridge"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"><title>ZeroBridge · 手机控制</title></head>
 <body>
-<header><div class="brand"><img src="/icon.svg" alt="" width="38" height="38"><div><strong>ZeroBridge</strong><small>MIHOMO / MOBILE</small></div></div><span class="version">v0.3</span><h1>代理控制台</h1><p>在手机选择，在电脑同步。</p><div id="connection" role="status"><span class="dot"></span><span id="connectionText">等待连接电脑</span></div></header>
+<header><div class="brand"><img src="/icon.svg" alt="" width="38" height="38"><div><strong>ZeroBridge</strong><small>MIHOMO / MOBILE</small></div></div><span id="version" class="version">v0.3.1</span><h1>代理控制台</h1><p>在手机选择，在电脑同步。</p><div id="connection" role="status"><span class="dot"></span><span id="connectionText">等待连接电脑</span></div></header>
 <main>
 <section id="login" class="card"><span class="eyebrow">连接你的 WINDOWS</span><h2>配对 ZeroBridge</h2><p>保持 ZeroTier 连接，输入电脑端「手机控制」中显示的访问密钥。</p><form id="loginForm"><label for="token">访问密钥</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴访问密钥" required><label class="check"><input id="remember" type="checkbox" checked>在这台设备记住连接</label><button class="primary full" type="submit">连接电脑 <span>↗</span></button></form><p class="hint">电脑和手机需在同一 ZeroTier 网络；控制页面不要求开启 Default Route。</p></section>
 <section id="proxies" hidden>
 <div class="sectionTitle"><div><span class="eyebrow">LIVE SELECTION</span><h2>选择代理</h2></div><button id="refresh" class="quiet" aria-label="刷新代理状态">↻ 刷新</button></div>
 <div class="card current"><div class="row"><span>Clash 当前模式</span><span id="mode" class="pill">—</span></div><label for="groups">代理组</label><select id="groups"></select><div class="activeNode"><span class="dot"></span><div><small>当前选择</small><strong id="currentNode">—</strong></div></div><p id="groupHint" class="hint"></p></div>
+<div class="latencyTools"><button id="testDelay" class="secondary" type="button">测本组延迟</button><label for="sort">排序<select id="sort"><option value="original">原始顺序</option><option value="latency">延迟从低到高</option></select></label></div><p class="hint latencyHint">延迟由电脑经节点访问测试站点测得，不包含手机到电脑的连接耗时。点击测速后更新。</p>
 <div class="search"><input id="search" type="search" placeholder="搜索节点或代理组" aria-label="搜索节点或代理组"><span id="nodeCount"></span></div><div id="nodes" class="nodeList"></div><p class="hint">切换会影响这台电脑共用的 Clash 配置及新建连接；已有连接可能继续使用原节点。</p>
 </section>
 <section id="history" hidden><div class="sectionTitle"><div><span class="eyebrow">COMMAND SYNC</span><h2>操作记录</h2></div><span class="pill">电脑同步</span></div><div id="events" class="eventList"></div></section>
@@ -15,5 +16,5 @@
 <footer>ZeroBridge Mihomo · 本地控制，不提供 VPN 服务</footer>
 </main>
 <nav id="tabs" hidden aria-label="主导航"><button data-page="proxies" class="active"><span>◈</span>代理</button><button data-page="history"><span>≡</span>记录</button><button data-page="settings"><span>⌁</span>连接</button></nav>
-<dialog id="confirm"><div class="sheetHandle"></div><span class="eyebrow">CHANGE PROXY</span><h2>确认切换节点</h2><p id="confirmGroup"></p><strong id="confirmNode"></strong><p class="hint">确认后发送到电脑上的 Clash，结果将在两端同步显示。</p><div class="actions"><button id="cancel" class="secondary">取消</button><button id="apply" class="primary">确认切换</button></div></dialog>
+<dialog id="confirm"><div class="sheetHandle"></div><span class="eyebrow">CHANGE PROXY</span><h2>确认切换节点</h2><p id="confirmGroup"></p><strong id="confirmNode"></strong><p id="confirmHint" class="hint">确认后发送到电脑上的 Clash，结果将在两端同步显示。</p><div class="actions"><button id="cancel" class="secondary">取消</button><button id="apply" class="primary">确认切换</button></div></dialog>
 <script src="/app.js" defer></script></body></html>

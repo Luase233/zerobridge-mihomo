@@ -4,7 +4,7 @@
 
 ## 简体中文
 
-v0.3.0 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framework 4.x（验证环境为 Windows 11）。桌面界面本身不新增网络监听端口，也不替换正在运行的网关进程。可选的[手机控制服务](MOBILE.md)会单独监听配置的 ZeroTier 私有地址。
+v0.3.1 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framework 4.x（验证环境为 Windows 11）。桌面界面本身不新增网络监听端口，也不替换正在运行的网关进程。可选的[手机控制服务](MOBILE.md)会单独监听配置的 ZeroTier 私有地址。
 
 - **运行面板：** 心跳状态、活动连接、收发包速率、当前代理进程累计拒绝/错误计数。
 - **图表：** 切换收发包速率和活动连接，最多显示打开界面后最近 10 分钟的数据。网关约每 5 秒写入统计，界面每 2 秒刷新。这里是包/秒，不是 Mbps；拒绝计数不等于丢包率。
@@ -30,7 +30,7 @@ v0.3.0 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framewo
 
 安装后可运行 `C:\ZeroTierGateway\bin\zerobridge-desktop.exe`。本次发布提供源码，需要先执行构建命令；安装器要求已有网关安装，不是完整网络安装器。
 
-「手机控制」按钮显示配对二维码、连接信息和最近 20 条指令；主面板显示最新指令结果。二维码包含访问密钥，不要将真实二维码或 `mobile.json` 提交到仓库。详见[手机控制说明](MOBILE.md)。
+「手机控制」按钮显示配对二维码、连接信息和最近 20 条指令；主面板显示最新指令结果。v0.3.1 同步显示指令的出站说明，区分 Clash 已确认选中节点与当前模式是否使用该组；将鼠标移到记录上可查看完整说明和提交时模式。旧记录缺少这些字段时沿用原结果。二维码包含访问密钥，不要将真实二维码或 `mobile.json` 提交到仓库。详见[手机控制说明](MOBILE.md)。
 
 计划任务 `ZeroBridgeMihomoTray` 使用当前用户、交互登录、普通权限和无限运行时间；下次登录时以托盘方式启动。若管理员凭据属于另一账户，请显式传入 `-UserId '计算机名\实际用户'`。原 `ZeroTierGateway` SYSTEM 开机任务和 High 优先级保持独立。界面不能在用户登录前显示。
 
@@ -40,7 +40,7 @@ v0.3.0 包含独立的 Windows Forms 界面，使用 Windows 自带 .NET Framewo
 
 ## English
 
-v0.3.0 includes a standalone Windows Forms dashboard using Windows' .NET Framework 4.x (validated on Windows 11). The desktop UI itself opens no network listener and does not replace the running gateway process. The optional [mobile service](MOBILE.md) separately listens on the configured private ZeroTier address.
+v0.3.1 includes a standalone Windows Forms dashboard using Windows' .NET Framework 4.x (validated on Windows 11). The desktop UI itself opens no network listener and does not replace the running gateway process. The optional [mobile service](MOBILE.md) separately listens on the configured private ZeroTier address.
 
 - **Dashboard:** supervisor heartbeat, active connections, packet rates, and the current proxy process's cumulative rejected/error counters.
 - **Charts:** switch between packet rates and active connections, retaining up to ten minutes collected while the UI runs. Gateway statistics arrive about every five seconds; the UI polls every two seconds. Rates are packets/s, not Mbps; rejected packets are not a packet-loss measurement.
@@ -66,7 +66,7 @@ Install and configure the gateway and management scripts following the README fi
 
 After installation, run `C:\ZeroTierGateway\bin\zerobridge-desktop.exe`. This release provides source, so build it first. The installer requires an existing gateway installation and is not a complete network installer.
 
-The Mobile control button shows the pairing QR, connection information and the last twenty commands; the main dashboard shows the latest result. The QR contains an access credential: do not commit a real QR or `mobile.json`. See the [mobile guide](MOBILE.md).
+The Mobile control button shows the pairing QR, connection information and the last twenty commands; the main dashboard shows the latest result. v0.3.1 also shows command routing notes, distinguishing a confirmed Clash selection from whether the current mode uses that group. Hover over a record for the complete note and the mode when the command was submitted. Older records without these fields retain their previous result display. The QR contains an access credential: do not commit a real QR or `mobile.json`. See the [mobile guide](MOBILE.md).
 
 The `ZeroBridgeMihomoTray` task runs as the user at interactive logon, with limited privileges and no time limit, starting minimized. If elevation uses a different administrator account, supply `-UserId 'COMPUTER\actual-user'`. The separate SYSTEM `ZeroTierGateway` boot task retains its High priority. The UI cannot appear before a user logs on.
 

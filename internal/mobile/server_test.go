@@ -1,10 +1,8 @@
 package mobile
 
 import (
-	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,10 +20,19 @@ type fakeClash struct {
 	uncertain bool
 }
 
+// Keep controller contract tests independent of local firewall/network policy.
+type handlerTransport struct{ handler http.Handler }
+
+func (t handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	t.handler.ServeHTTP(w, r)
+	return w.Result(), nil
+}
+
 func setup(t *testing.T) (*Server, *fakeClash) {
 	t.Helper()
 	f := &fakeClash{selected: "first"}
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.Lock()
 		defer f.Unlock()
 		switch {
@@ -48,14 +55,9 @@ func setup(t *testing.T) (*Server, *fakeClash) {
 		default:
 			w.WriteHeader(404)
 		}
-	}))
-	t.Cleanup(upstream.Close)
-	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
-	}}
-	t.Cleanup(transport.CloseIdleConnections)
+	})
 	cfg := Config{Listen: "127.0.0.1:8787", AllowedClients: []string{"127.0.0.1"}, Token: strings.Repeat("x", 43), Pipe: `\\.\pipe\test`, StateFile: filepath.Join(t.TempDir(), "status.json")}
-	s, err := New(cfg, Controller{Client: &http.Client{Transport: transport, Timeout: time.Second}})
+	s, err := New(cfg, Controller{Client: &http.Client{Transport: handlerTransport{upstream}, Timeout: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}

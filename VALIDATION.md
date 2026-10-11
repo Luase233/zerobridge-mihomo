@@ -24,6 +24,16 @@ Desktop/mobile validation for v0.3.0:
 - The user subsequently confirmed that a physical iPhone could control proxy selection successfully. This is user-reported acceptance, not a comprehensive test across iOS versions.
 - Mobile and tray logon tasks were installed with limited user privileges; the existing gateway proxy and guard remained running during installation.
 
+Control validation for v0.3.1 (2026-10-11):
+
+- Mobile controller tests pass using in-memory HTTP transport. They cover rule-mode defaults and nested paths, direct mode, unavailable rules, fixed-URL node delays and escaped names, invalid requests, concurrent delay/read/selection, final readback reconciliation, applied writes with failed HTTP responses, idempotency and cancelled refreshes.
+- Full `go test ./...` and `go vet ./...` pass. Desktop's eleven model checks and both control builds pass. Bilingual command parity and local documentation links pass.
+- A rendered 390×844 mobile viewport with mocked data passes latency labels and sorting, preferred/manual group preservation, exact-name readback, old-poll cancellation and stale response rejection, disconnected controls and no horizontal overflow, with no page-script errors.
+- The deployed named-pipe controller returned real delay measurements for three existing nodes. A command reselecting the current node was confirmed by controller readback and the desktop audit, without choosing a different node for this diagnostic.
+- The user confirmed that a physical iPhone displays node delays and updates Clash selections. The latest phone command's confirmed target agreed with the current group selection. This is acceptance on one device, not coverage across all iOS or Clash versions.
+- The control updater installed v0.3.1 and verified a fresh online heartbeat. Configuration, pairing QR, gateway binary and runner hashes remained unchanged; task XML was preserved, and the original forwarding run stayed ready. Its initial readiness failure exercised restoration of the previous control binaries before the UTF-8 reader fix.
+- Eight isolated updater checks pass in PowerShell 5.1 and 7, covering hash-checked copying, changed-source rejection, Chinese UTF-8 status, nanosecond timestamps, heartbeat rejection and reused-PID refusal. The test helper never changes installed files, tasks or processes.
+
 Still not established:
 
 - Long-term reliability, independent security audit, sustained adversarial/resource-exhaustion testing.
