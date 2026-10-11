@@ -92,6 +92,8 @@ Edit `gateway.json`. Example addresses and interface indices are placeholders, n
 | `tcp_idle_timeout_seconds` | TCP idle limit; missing/0 defaults to 1800 seconds (30 minutes), explicit range 120–86400 seconds |
 | `windivert_dll` | Default `runtime/WinDivert.dll`, relative to the configuration file |
 
+TCP and UDP share `max_flows`. If `flow_limit_rejections` increases during normal use while `active` reaches the limit, consider changing the installed configuration from 256 to 512 on a PC with sufficient memory. This adds concurrency, not link bandwidth. Turn the phone's Default Route OFF, back up the configuration, then follow the update procedure below to restart and verify it. Keep a bounded limit rather than shortening TCP idle lifetime to free capacity.
+
 **Review the NAT template separately.** `scripts/Nat.ps1` still restricts operations to `ZeroTierNAT` and the example prefix `10.147.20.0/24`. Before using another subnet, review and adjust `$expectedPrefix` there and the `Expected` fields in `scripts/Inspect.ps1`. Changing JSON alone does not authorize management of another NAT; mismatches are rejected.
 
 ### 3. Run read-only checks

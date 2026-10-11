@@ -43,6 +43,7 @@ Stability validation for v0.3.2 (2026-10-11):
 - Fourteen desktop model checks pass, including byte-based Mbps, counter-reset protection and degraded-state chart pause. Both control programs and the gateway build successfully.
 - A rendered 390x844 phone mock verifies latency/group/selection behavior and online/pageshow/visibility recovery. Stale state GETs are cancelled; pending selection/delay POSTs are not aborted or replayed. Pairing and manual group selection persist, offline controls disable, and there are no page-script errors or horizontal overflow.
 - The deployed gateway, mobile control and desktop report v0.3.2. Fresh owned health, SYSTEM boot task, High gateway child priority and both user tasks were checked. Configuration, pairing QR and task settings were preserved; WinNAT remained absent. The user confirmed cellular proxy access/video on initial connection and again after about three minutes idle on a physical iPhone.
+- Subsequent live traffic reached the configured 256 shared TCP/UDP flow limit and increased `flow_limit_rejections` to 93; this counts rejected attempts, including retries, not distinct applications or network packet loss. With available memory checked, only the installed configuration was tuned to 512. Fresh owned health, matching configuration proofs, High priorities, the boot task and unchanged pairing were verified after restart. The repository default remains 256; this capacity adjustment does not establish an Internet speed gain.
 
 Still not established:
 

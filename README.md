@@ -92,6 +92,8 @@ Copy-Item .\gateway.example.json .\gateway.json
 | `tcp_idle_timeout_seconds` | TCP 空闲期限；缺省/0 使用 1800 秒（30 分钟），显式值范围 120–86400 秒 |
 | `windivert_dll` | 默认 `runtime/WinDivert.dll`，相对配置文件解析 |
 
+TCP 与 UDP 共用 `max_flows`。若日志中 `flow_limit_rejections` 在正常使用时增加，且 `active` 同时达到上限，可在内存充足的电脑上将安装配置的 256 调到 512；这会增加并发容量，不代表提高线路带宽。修改前关闭手机 Default Route，备份配置，随后按下方更新流程重启并核验新配置；保留有界限制，不要先缩短 TCP 空闲期限来腾出容量。
+
 **NAT 模板需单独核对。** `scripts/Nat.ps1` 仍限定 `ZeroTierNAT` 和示例前缀 `10.147.20.0/24`。使用其他网段前，审阅并调整 `$expectedPrefix`，以及 `scripts/Inspect.ps1` 的 `Expected` 字段。只修改 JSON 不会让脚本管理另一条 NAT；不匹配时会拒绝操作。
 
 ### 3. 只读预检
